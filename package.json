@@ -1,0 +1,28 @@
+{
+  "name": "warlords-clone",
+  "version": "1.0.0",
+  "description": "A modern web-based clone of the classic turn-based strategy game Warlords",
+  "type": "module",
+  "main": "js/main.js",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "test": "cross-env NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+    "test:watch": "cross-env NODE_OPTIONS=\"--experimental-vm-modules\" jest --watch"
+  },
+  "keywords": [
+    "game",
+    "strategy",
+    "turn-based",
+    "warlords",
+    "html5",
+    "canvas"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "fast-check": "^4.5.2",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}

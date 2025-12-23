@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warlords Clone</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game-container">
+        <header id="game-header">
+            <h1>Warlords Clone</h1>
+            <div id="game-info">
+                <span id="current-player">Player 1</span>
+                <span id="turn-counter">Turn: 1</span>
+            </div>
+        </header>
+        
+        <main id="game-main">
+            <div id="game-canvas-container">
+                <canvas id="game-canvas" width="800" height="600"></canvas>
+            </div>
+            
+            <aside id="game-sidebar">
+                <div id="unit-info" class="info-panel">
+                    <h3>Unit Information</h3>
+                    <div id="unit-details"></div>
+                </div>
+                
+                <div id="city-info" class="info-panel">
+                    <h3>City Information</h3>
+                    <div id="city-details"></div>
+                </div>
+                
+                <div id="game-controls" class="info-panel">
+                    <h3>Controls</h3>
+                    <div id="turn-info">
+                        <p><strong>Current Player:</strong> <span id="current-player-name">Player 1</span></p>
+                        <p><strong>Turn:</strong> <span id="turn-number">1</span></p>
+                        <p><strong>Phase:</strong> <span id="game-phase">Setup</span></p>
+                    </div>
+                    <button id="end-turn-btn">End Turn</button>
+                    <button id="save-game-btn">Save Game</button>
+                    <button id="load-game-btn">Load Game</button>
+                </div>
+            </aside>
+        </main>
+    </div>
+    
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
