@@ -18,16 +18,16 @@ export class GameState {
         this.cities = new Map();
         this.currentTurn = 1;
         this.activePlayer = 0;
-        
+
         // Movement manager for turn-based constraints
         this.movementManager = new MovementManager(this);
-        
+
         // Observer pattern for state changes
         this.observers = [];
-        
+
         console.log('GameState created');
     }
-    
+
     /**
      * Initialize the game state with configuration
      * @param {Object} config - Game configuration
@@ -35,14 +35,14 @@ export class GameState {
     initialize(config) {
         try {
             console.log('Initializing GameState with config:', config);
-            
+
             // Initialize players using Player class
             this.players = config.players.map(playerConfig => {
                 // Validate faction exists
                 if (!factionManager.isValidFaction(playerConfig.faction)) {
                     throw new Error(`Invalid faction: ${playerConfig.faction}`);
                 }
-                
+
                 return new Player(
                     playerConfig.id,
                     playerConfig.name,
@@ -51,31 +51,48 @@ export class GameState {
                     playerConfig.isAI
                 );
             });
-            
+
             // Initialize map using MapGenerator
             this.map = mapGenerator.generateMap(
-                config.map.width, 
-                config.map.height, 
+                config.map.width,
+                config.map.height,
                 config.map.generationOptions || {}
             );
-            
+
+            // Initialize empty collections for units and cities
+            this.units.clear();
             // Initialize empty collections for units and cities
             this.units.clear();
             this.cities.clear();
-            
+
+            // Extract cities placed by the map generator
+            // Iterate through all hexes to find cities
+            for (let y = 0; y < this.map.height; y++) {
+                for (let x = 0; x < this.map.width; x++) {
+                    const hex = this.map.getHex(x, y);
+                    if (hex && hex.city) {
+                        // hex.city is the City object placed by MapGenerator
+                        this.addCity(hex.city);
+                    }
+                }
+            }
+
+            // Distribute cities to players
+            this.assignStartingCities(config.players);
+
             // Reset turn counter
             this.currentTurn = 1;
             this.activePlayer = 0;
-            
+
             console.log('GameState initialized successfully');
             this.notifyObservers('gameInitialized', { config });
-            
+
         } catch (error) {
             console.error('Failed to initialize GameState:', error);
             throw error;
         }
     }
-    
+
     /**
      * Subscribe to state changes
      * @param {Function} observer - Observer function
@@ -85,7 +102,7 @@ export class GameState {
             this.observers.push(observer);
         }
     }
-    
+
     /**
      * Unsubscribe from state changes
      * @param {Function} observer - Observer function to remove
@@ -96,7 +113,7 @@ export class GameState {
             this.observers.splice(index, 1);
         }
     }
-    
+
     /**
      * Notify all observers of state changes
      * @param {string} event - Event type
@@ -111,7 +128,7 @@ export class GameState {
             }
         });
     }
-    
+
     /**
      * Serialize the game state for saving
      * @returns {Object} - Serialized state
@@ -126,7 +143,7 @@ export class GameState {
             map: this.map ? this.map.serialize() : null
         };
     }
-    
+
     /**
      * Deserialize and restore game state
      * @param {Object} data - Serialized state data
@@ -138,7 +155,7 @@ export class GameState {
             this.cities = new Map(data.cities || []);
             this.currentTurn = data.currentTurn || 1;
             this.activePlayer = data.activePlayer || 0;
-            
+
             // Deserialize map when Map system is implemented
             if (data.map) {
                 try {
@@ -148,16 +165,16 @@ export class GameState {
                     this.map = null;
                 }
             }
-            
+
             console.log('GameState deserialized successfully');
             this.notifyObservers('gameLoaded', data);
-            
+
         } catch (error) {
             console.error('Failed to deserialize GameState:', error);
             throw error;
         }
     }
-    
+
     /**
      * Get player by ID
      * @param {number} playerId - Player ID
@@ -166,7 +183,7 @@ export class GameState {
     getPlayer(playerId) {
         return this.players.find(player => player.id === playerId) || null;
     }
-    
+
     /**
      * Get all players
      * @returns {Array} - Array of player objects
@@ -174,7 +191,7 @@ export class GameState {
     getPlayers() {
         return [...this.players];
     }
-    
+
     /**
      * Get all active (non-eliminated) players
      * @returns {Array} - Array of active player objects
@@ -182,7 +199,7 @@ export class GameState {
     getActivePlayers() {
         return this.players.filter(player => !player.isEliminated);
     }
-    
+
     /**
      * Check if a player is eliminated
      * @param {number} playerId - Player ID
@@ -192,7 +209,7 @@ export class GameState {
         const player = this.getPlayer(playerId);
         return player ? player.isEliminated : true;
     }
-    
+
     /**
      * Eliminate a player
      * @param {number} playerId - Player ID to eliminate
@@ -205,7 +222,7 @@ export class GameState {
             this.notifyObservers('playerEliminated', { playerId, player });
         }
     }
-    
+
     /**
      * Get player's faction
      * @param {number} playerId - Player ID
@@ -215,7 +232,7 @@ export class GameState {
         const player = this.getPlayer(playerId);
         return player ? factionManager.getFaction(player.faction) : null;
     }
-    
+
     /**
      * Check if player can afford a cost
      * @param {number} playerId - Player ID
@@ -226,7 +243,7 @@ export class GameState {
         const player = this.getPlayer(playerId);
         return player ? player.canAfford(cost) : false;
     }
-    
+
     /**
      * Make player spend gold
      * @param {number} playerId - Player ID
@@ -237,7 +254,7 @@ export class GameState {
         const player = this.getPlayer(playerId);
         return player ? player.spendGold(amount) : false;
     }
-    
+
     /**
      * Give gold to player
      * @param {number} playerId - Player ID
@@ -249,7 +266,7 @@ export class GameState {
             player.addGold(amount);
         }
     }
-    
+
     /**
      * Reset units for a player (clear their action flags)
      * @param {number} playerId - Player ID
@@ -259,14 +276,14 @@ export class GameState {
         if (player) {
             player.resetForTurn();
         }
-        
+
         // Reset movement for player units using MovementManager
         this.movementManager.resetPlayerMovement(playerId);
-        
+
         console.log(`Resetting units for player ${playerId}`);
         this.notifyObservers('unitsReset', { playerId });
     }
-    
+
     /**
      * Get current turn number
      * @returns {number} - Current turn
@@ -274,7 +291,7 @@ export class GameState {
     getCurrentTurn() {
         return this.currentTurn;
     }
-    
+
     /**
      * Increment turn counter
      */
@@ -283,7 +300,7 @@ export class GameState {
         console.log(`Turn incremented to ${this.currentTurn}`);
         this.notifyObservers('turnIncremented', { turn: this.currentTurn });
     }
-    
+
     /**
      * Get active player ID
      * @returns {number} - Active player ID
@@ -291,7 +308,7 @@ export class GameState {
     getActivePlayer() {
         return this.activePlayer;
     }
-    
+
     /**
      * Set active player
      * @param {number} playerId - Player ID to set as active
@@ -302,7 +319,7 @@ export class GameState {
             this.notifyObservers('activePlayerChanged', { playerId });
         }
     }
-    
+
     /**
      * Add a unit to the game state
      * @param {Object} unit - Unit object
@@ -313,7 +330,7 @@ export class GameState {
             this.notifyObservers('unitAdded', { unit });
         }
     }
-    
+
     /**
      * Remove a unit from the game state
      * @param {string} unitId - Unit ID
@@ -325,7 +342,7 @@ export class GameState {
             this.notifyObservers('unitRemoved', { unitId, unit });
         }
     }
-    
+
     /**
      * Get unit by ID
      * @param {string} unitId - Unit ID
@@ -334,7 +351,7 @@ export class GameState {
     getUnit(unitId) {
         return this.units.get(unitId) || null;
     }
-    
+
     /**
      * Get all units for a player
      * @param {number} playerId - Player ID
@@ -343,7 +360,7 @@ export class GameState {
     getPlayerUnits(playerId) {
         return Array.from(this.units.values()).filter(unit => unit.owner === playerId);
     }
-    
+
     /**
      * Add a city to the game state
      * @param {Object} city - City object
@@ -354,7 +371,7 @@ export class GameState {
             this.notifyObservers('cityAdded', { city });
         }
     }
-    
+
     /**
      * Remove a city from the game state
      * @param {string} cityId - City ID
@@ -366,7 +383,7 @@ export class GameState {
             this.notifyObservers('cityRemoved', { cityId, city });
         }
     }
-    
+
     /**
      * Get city by ID
      * @param {string} cityId - City ID
@@ -375,7 +392,7 @@ export class GameState {
     getCity(cityId) {
         return this.cities.get(cityId) || null;
     }
-    
+
     /**
      * Get all cities for a player
      * @param {number} playerId - Player ID
@@ -384,7 +401,7 @@ export class GameState {
     getPlayerCities(playerId) {
         return Array.from(this.cities.values()).filter(city => city.owner === playerId);
     }
-    
+
     /**
      * Validate the current game state
      * @returns {boolean} - True if state is valid
@@ -396,29 +413,29 @@ export class GameState {
                 console.error('Invalid players array');
                 return false;
             }
-            
+
             // Check turn number
             if (this.currentTurn < 1) {
                 console.error('Invalid turn number');
                 return false;
             }
-            
+
             // Check active player
             if (!this.getPlayer(this.activePlayer)) {
                 console.error('Invalid active player');
                 return false;
             }
-            
+
             // TODO: Add more validation when other systems are implemented
-            
+
             return true;
-            
+
         } catch (error) {
             console.error('State validation error:', error);
             return false;
         }
     }
-    
+
     /**
      * Generate a new map with the given dimensions and options
      * @param {number} width - Map width
@@ -430,7 +447,7 @@ export class GameState {
         console.log('New map generated');
         this.notifyObservers('mapGenerated', { width, height, options });
     }
-    
+
     /**
      * Generate a test map with specific pattern
      * @param {number} width - Map width
@@ -450,7 +467,7 @@ export class GameState {
     getMap() {
         return this.map;
     }
-    
+
     /**
      * Get hex at coordinates
      * @param {number} x - X coordinate
@@ -460,7 +477,7 @@ export class GameState {
     getHex(x, y) {
         return this.map ? this.map.getHex(x, y) : null;
     }
-    
+
     /**
      * Find path between two points
      * @param {number} startX - Start X coordinate
@@ -473,7 +490,7 @@ export class GameState {
     findPath(startX, startY, endX, endY, unit = null) {
         return this.map ? this.map.findPath(startX, startY, endX, endY, unit) : null;
     }
-    
+
     /**
      * Get reachable hexes for a unit
      * @param {number} startX - Start X coordinate
@@ -500,7 +517,22 @@ export class GameState {
         }
         return null;
     }
-    
+
+    /**
+     * Get city at specific coordinates
+     * @param {number} x - X coordinate
+     * @param {number} y - Y coordinate
+     * @returns {City|null} - City at coordinates or null
+     */
+    getCityAt(x, y) {
+        for (const city of this.cities.values()) {
+            if (city.x === x && city.y === y) {
+                return city;
+            }
+        }
+        return null;
+    }
+
     /**
      * Get movement range for a unit
      * @param {Unit} unit - Unit to get movement range for
@@ -510,10 +542,10 @@ export class GameState {
         if (!unit || !this.canUnitMove(unit)) {
             return [];
         }
-        
+
         return this.getUnitReachableHexes(unit);
     }
-    
+
     /**
      * Get all units
      * @returns {Map} - Map of all units
@@ -521,7 +553,7 @@ export class GameState {
     getUnits() {
         return this.units;
     }
-    
+
     /**
      * Get all cities
      * @returns {Map} - Map of all cities
@@ -540,7 +572,7 @@ export class GameState {
     moveUnit(unit, targetX, targetY) {
         return this.movementManager.moveUnit(unit, targetX, targetY);
     }
-    
+
     /**
      * Move a stack using movement manager
      * @param {Stack} stack - Stack to move
@@ -551,7 +583,7 @@ export class GameState {
     moveStack(stack, targetX, targetY) {
         return this.movementManager.moveStack(stack, targetX, targetY);
     }
-    
+
     /**
      * Check if a unit can move
      * @param {Unit} unit - Unit to check
@@ -560,7 +592,7 @@ export class GameState {
     canUnitMove(unit) {
         return this.movementManager.canUnitMove(unit);
     }
-    
+
     /**
      * Check if a stack can move
      * @param {Stack} stack - Stack to check
@@ -569,7 +601,7 @@ export class GameState {
     canStackMove(stack) {
         return this.movementManager.canStackMove(stack);
     }
-    
+
     /**
      * Get reachable hexes for a unit with movement constraints
      * @param {Unit} unit - Unit to check
@@ -578,7 +610,7 @@ export class GameState {
     getUnitReachableHexes(unit) {
         return this.movementManager.getReachableHexes(unit);
     }
-    
+
     /**
      * Get reachable hexes for a stack with movement constraints
      * @param {Stack} stack - Stack to check
@@ -587,7 +619,7 @@ export class GameState {
     getStackReachableHexes(stack) {
         return this.movementManager.getReachableHexesForStack(stack);
     }
-    
+
     /**
      * Get movement statistics for current turn
      * @returns {Object} - Movement statistics
@@ -595,6 +627,39 @@ export class GameState {
     getMovementStatistics() {
         return this.movementManager.getMovementStatistics();
     }
+
+    /**
+     * Assign starting cities to players
+     * @param {Array} playerConfigs - Player configurations
+     */
+    assignStartingCities(playerConfigs) {
+        // Simple assignment:
+        // 1. Get all cities
+        const allCities = Array.from(this.cities.values());
+
+        if (allCities.length < playerConfigs.length) {
+            console.warn("Not enough cities for all players!");
+        }
+
+        // 2. Sort cities or pick random ones to be "Capitals"
+        // For now, let's just pick the first N cities as capitals since map generator shuffled them
+
+        for (let i = 0; i < playerConfigs.length; i++) {
+            if (i < allCities.length) {
+                const city = allCities[i];
+                const player = this.getPlayer(playerConfigs[i].id);
+
+                if (player) {
+                    // Update city ownership
+                    city.changeOwner(player.id, this.players);
+                    city.size = 2; // Capitals start a bit bigger
+                    // Rename to Capital? Maybe not, keep random fantasy names
+                    console.log(`Assigned starting city ${city.name} to ${player.name}`);
+                }
+            }
+        }
+    }
+
 
     /**
      * Get a summary of the current game state

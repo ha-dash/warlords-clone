@@ -31,43 +31,46 @@ const GAME_LOOP_CONFIG = {
  */
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Warlords Clone - Starting initialization...');
-    
+
     try {
         // Validate browser environment
         if (!validateBrowserSupport()) {
             showError('Your browser does not support required features. Please use a modern browser.');
             return;
         }
-        
+
         // Initialize the game manager (this will initialize all subsystems)
         console.log('Creating GameManager...');
         gameManager = new GameManager('game-canvas');
-        
-        // Set up UI event listeners before game initialization
-        console.log('Setting up UI event listeners...');
-        setupUIEventListeners();
-        
-        // Set up global error handling
-        setupErrorHandling();
-        
-        // Initialize the game with default configuration
-        console.log('Initializing game with default configuration...');
-        const defaultConfig = createDefaultGameConfig();
-        
-        gameManager.initializeGame(defaultConfig);
-        
-        // Start the main game loop
-        console.log('Starting main game loop...');
-        startGameLoop();
-        
+        window.gameManager = gameManager; // Expose globally for subsystems
+
+        import('./ui/GameSetup.js').then(({ GameSetup }) => {
+            console.log('Initializing Game Setup UI...');
+            // Keep UI listeners (like Save/Load buttons) active
+            setupUIEventListeners();
+
+            // Set up global error handling
+            setupErrorHandling();
+
+            // Show setup screen instead of auto-starting
+            new GameSetup(gameManager);
+
+            // Start the main game loop immediately to handle UI updates if needed
+            // But gameManager.isActive won't be true until initialized
+            startGameLoop();
+        });
+
         // Set up window event handlers
         setupWindowEventHandlers();
-        
+
+        // Set up window event handlers
+        setupWindowEventHandlers();
+
         console.log('Warlords Clone - Initialization complete!');
-        
+
         // Show welcome message
         showMessage('Welcome to Warlords Clone! Click on units to select them, then click on hexes to move.');
-        
+
     } catch (error) {
         console.error('Failed to initialize Warlords Clone:', error);
         showError(`Failed to initialize game: ${error.message}. Please refresh the page.`);
@@ -85,7 +88,7 @@ function validateBrowserSupport() {
         console.error('Canvas 2D not supported');
         return false;
     }
-    
+
     // Check for Local Storage support
     try {
         const testKey = '__warlords_test__';
@@ -95,13 +98,13 @@ function validateBrowserSupport() {
         console.error('Local Storage not supported');
         return false;
     }
-    
+
     // Check for ES6 module support (already loaded if we get here)
     if (typeof Map === 'undefined' || typeof Set === 'undefined') {
         console.error('ES6 features not supported');
         return false;
     }
-    
+
     return true;
 }
 
@@ -112,31 +115,31 @@ function validateBrowserSupport() {
 function createDefaultGameConfig() {
     return {
         map: {
-            width: 20,
-            height: 15,
+            width: 40,
+            height: 30,
             hexSize: 32
         },
         players: [
-            { 
-                id: 0, 
-                name: 'Player 1', 
-                faction: 'HUMANS', 
-                color: '#0066CC', 
-                isAI: false 
+            {
+                id: 0,
+                name: 'Player 1',
+                faction: 'human',
+                color: '#0066CC',
+                isAI: false
             },
-            { 
-                id: 1, 
-                name: 'AI 1', 
-                faction: 'ELVES', 
-                color: '#00CC66', 
-                isAI: true 
+            {
+                id: 1,
+                name: 'AI 1',
+                faction: 'elf',
+                color: '#00CC66',
+                isAI: true
             },
-            { 
-                id: 2, 
-                name: 'AI 2', 
-                faction: 'DEMONS', 
-                color: '#CC0066', 
-                isAI: true 
+            {
+                id: 2,
+                name: 'AI 2',
+                faction: 'undead',
+                color: '#CC0066',
+                isAI: true
             }
         ],
         gameSettings: {
@@ -157,34 +160,34 @@ function startGameLoop() {
     if (gameLoopId) {
         cancelAnimationFrame(gameLoopId);
     }
-    
+
     lastFrameTime = performance.now();
-    
+
     function gameLoop(currentTime) {
         try {
             // Calculate delta time
             const deltaTime = Math.min(currentTime - lastFrameTime, GAME_LOOP_CONFIG.maxDeltaTime);
             lastFrameTime = currentTime;
-            
+
             // Update game systems
             if (gameManager && gameManager.isGameInitialized()) {
                 // Update game logic (if needed for animations, etc.)
                 updateGameLogic(deltaTime);
-                
+
                 // Render the game
                 gameManager.render();
             }
-            
+
             // Schedule next frame
             gameLoopId = requestAnimationFrame(gameLoop);
-            
+
         } catch (error) {
             console.error('Error in game loop:', error);
             // Continue the loop even if there's an error
             gameLoopId = requestAnimationFrame(gameLoop);
         }
     }
-    
+
     // Start the loop
     gameLoopId = requestAnimationFrame(gameLoop);
     console.log('Main game loop started');
@@ -201,7 +204,7 @@ function updateGameLogic(deltaTime) {
     // - UI transitions
     // - Sound effects
     // - Auto-save timer
-    
+
     // For now, this is mostly a placeholder for future enhancements
     // The main game logic is handled by the turn-based system in GameManager
 }
@@ -218,34 +221,34 @@ function setupWindowEventHandlers() {
             if (canvas) {
                 const container = canvas.parentElement;
                 const containerRect = container.getBoundingClientRect();
-                
+
                 // Maintain aspect ratio while fitting container
-                const aspectRatio = 4/3; // 800x600 default
+                const aspectRatio = 4 / 3; // 800x600 default
                 let newWidth = containerRect.width;
                 let newHeight = newWidth / aspectRatio;
-                
+
                 if (newHeight > containerRect.height) {
                     newHeight = containerRect.height;
                     newWidth = newHeight * aspectRatio;
                 }
-                
+
                 canvas.width = newWidth;
                 canvas.height = newHeight;
                 canvas.style.width = newWidth + 'px';
                 canvas.style.height = newHeight + 'px';
-                
+
                 // Update camera viewport
                 const renderEngine = gameManager.getRenderEngine();
                 if (renderEngine.camera) {
                     renderEngine.camera.setViewportSize(newWidth, newHeight);
                 }
-                
+
                 // Trigger re-render
                 gameManager.render();
             }
         }
     });
-    
+
     // Handle page visibility changes (pause/resume)
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
@@ -263,7 +266,7 @@ function setupWindowEventHandlers() {
             }
         }
     });
-    
+
     // Handle beforeunload for auto-save
     window.addEventListener('beforeunload', (event) => {
         if (gameManager && gameManager.isGameInitialized()) {
@@ -276,7 +279,7 @@ function setupWindowEventHandlers() {
             }
         }
     });
-    
+
     // Handle keyboard shortcuts globally
     document.addEventListener('keydown', (event) => {
         // Global shortcuts that work regardless of focus
@@ -309,7 +312,7 @@ function setupErrorHandling() {
         console.error('Uncaught error:', event.error);
         showError('An unexpected error occurred. The game may not function properly.');
     });
-    
+
     // Handle unhandled promise rejections
     window.addEventListener('unhandledrejection', (event) => {
         console.error('Unhandled promise rejection:', event.reason);
@@ -335,7 +338,7 @@ function setupUIEventListeners() {
     } else {
         console.warn('End turn button not found in DOM');
     }
-    
+
     // Save game button
     const saveGameBtn = document.getElementById('save-game-btn');
     if (saveGameBtn) {
@@ -349,7 +352,7 @@ function setupUIEventListeners() {
     } else {
         console.warn('Save game button not found in DOM');
     }
-    
+
     // Load game button
     const loadGameBtn = document.getElementById('load-game-btn');
     if (loadGameBtn) {
@@ -361,13 +364,13 @@ function setupUIEventListeners() {
     } else {
         console.warn('Load game button not found in DOM');
     }
-    
+
     // Set up keyboard shortcuts for UI
     document.addEventListener('keydown', (event) => {
         if (!gameManager || !gameManager.isGameInitialized()) {
             return;
         }
-        
+
         // Check for modifier keys to avoid conflicts
         if (event.ctrlKey || event.altKey || event.metaKey) {
             switch (event.key.toLowerCase()) {
@@ -388,7 +391,7 @@ function setupUIEventListeners() {
             }
         }
     });
-    
+
     // Set up context menu prevention on canvas (let InputEngine handle right-clicks)
     const canvas = document.getElementById('game-canvas');
     if (canvas) {
@@ -396,7 +399,7 @@ function setupUIEventListeners() {
             event.preventDefault();
         });
     }
-    
+
     console.log('UI event listeners set up successfully');
 }
 
@@ -406,7 +409,7 @@ function setupUIEventListeners() {
  */
 function showError(message) {
     console.error('Error:', message);
-    
+
     // Create error overlay
     const errorDiv = document.createElement('div');
     errorDiv.style.cssText = `
@@ -436,9 +439,9 @@ function showError(message) {
             cursor: pointer;
         ">Close</button>
     `;
-    
+
     document.body.appendChild(errorDiv);
-    
+
     // Auto-remove error after 10 seconds
     setTimeout(() => {
         if (errorDiv.parentNode) {
@@ -454,14 +457,14 @@ function showError(message) {
  */
 function showMessage(message, type = 'info') {
     console.log(`[${type.toUpperCase()}] ${message}`);
-    
+
     const colors = {
         info: '#3498db',
         success: '#27ae60',
         warning: '#f39c12',
         error: '#e74c3c'
     };
-    
+
     const messageDiv = document.createElement('div');
     messageDiv.style.cssText = `
         position: fixed;
@@ -478,7 +481,7 @@ function showMessage(message, type = 'info') {
         font-family: Arial, sans-serif;
         animation: slideIn 0.3s ease-out;
     `;
-    
+
     // Add CSS animation
     if (!document.getElementById('message-animations')) {
         const style = document.createElement('style');
@@ -495,10 +498,10 @@ function showMessage(message, type = 'info') {
         `;
         document.head.appendChild(style);
     }
-    
+
     messageDiv.textContent = message;
     document.body.appendChild(messageDiv);
-    
+
     // Remove message after 4 seconds with animation
     setTimeout(() => {
         messageDiv.style.animation = 'slideOut 0.3s ease-in';
@@ -518,7 +521,7 @@ function cleanup() {
         cancelAnimationFrame(gameLoopId);
         gameLoopId = null;
     }
-    
+
     if (gameManager) {
         // Perform any necessary cleanup
         console.log('Cleaning up game resources...');

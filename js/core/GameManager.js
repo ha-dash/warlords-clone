@@ -19,16 +19,16 @@ export class GameManager {
         this.inputEngine = null;
         this.aiEngine = null;
         this.saveLoadUI = null;
-        
+
         // Game flow control
         this.currentPlayer = 0;
         this.gamePhase = 'SETUP'; // SETUP, PLAYING, ENDED
         this.isInitialized = false;
         this.gameStartTime = null;
-        
+
         console.log('GameManager created with canvas:', canvasId);
     }
-    
+
     /**
      * Initialize the game with the given configuration
      * @param {Object} config - Game configuration object
@@ -36,48 +36,48 @@ export class GameManager {
     initializeGame(config) {
         try {
             console.log('Initializing game with config:', config);
-            
+
             // Validate configuration
             if (!this.validateConfig(config)) {
                 throw new Error('Invalid game configuration');
             }
-            
+
             // Initialize game state
             this.gameState = new GameState();
             this.gameState.initialize(config);
-            
+
             // Initialize render engine
             this.renderEngine = new RenderEngine(this.canvasId);
-            
+
             // Initialize input engine
             this.inputEngine = new InputEngine(this);
-            
+
             // Initialize AI engine
             this.aiEngine = new AIEngine(this.gameState);
-            
+
             // Initialize save/load UI
             this.saveLoadUI = new SaveLoadUI(this);
-            
+
             // Set initial game state
             this.currentPlayer = 0;
             this.gamePhase = 'PLAYING';
             this.isInitialized = true;
             this.gameStartTime = Date.now();
-            
+
             // Initial render
             this.render();
-            
+
             // Update UI
             this.updateUI();
-            
+
             console.log('Game initialized successfully');
-            
+
         } catch (error) {
             console.error('Failed to initialize game:', error);
             throw error;
         }
     }
-    
+
     /**
      * Validate game configuration
      * @param {Object} config - Configuration to validate
@@ -88,17 +88,17 @@ export class GameManager {
             console.error('Config is null or undefined');
             return false;
         }
-        
+
         if (!config.map || !config.map.width || !config.map.height) {
             console.error('Invalid map configuration');
             return false;
         }
-        
+
         if (!config.players || !Array.isArray(config.players) || config.players.length === 0) {
             console.error('Invalid players configuration');
             return false;
         }
-        
+
         // Validate each player
         for (const player of config.players) {
             if (player.id === undefined || !player.name || !player.faction || !player.color) {
@@ -106,10 +106,10 @@ export class GameManager {
                 return false;
             }
         }
-        
+
         return true;
     }
-    
+
     /**
      * Start a turn for the specified player
      * @param {number} playerId - ID of the player whose turn to start
@@ -119,32 +119,32 @@ export class GameManager {
             console.error('Game not initialized');
             return;
         }
-        
+
         if (this.gamePhase !== 'PLAYING') {
             console.error('Game is not in playing phase');
             return;
         }
-        
+
         console.log(`Starting turn for player ${playerId}`);
-        
+
         this.currentPlayer = playerId;
-        
+
         // Set active player in game state
         this.gameState.setActivePlayer(playerId);
-        
+
         // Process turn start activities
         this.processTurnStart(playerId);
-        
+
         // Update UI
         this.updateUI();
-        
+
         // If it's an AI player, process AI turn
         const player = this.gameState.getPlayer(playerId);
         if (player && player.isAI) {
             this.processAITurn(playerId);
         }
     }
-    
+
     /**
      * Process turn start activities for a player
      * @param {number} playerId - Player ID
@@ -155,70 +155,70 @@ export class GameManager {
             console.error(`Player ${playerId} not found`);
             return;
         }
-        
+
         console.log(`Processing turn start for ${player.name}`);
-        
+
         // Reset unit actions and movement for current player
         this.gameState.resetPlayerUnits(playerId);
-        
+
         // Handle unit maintenance (healing, upkeep, etc.)
         this.processUnitMaintenance(playerId);
-        
+
         // Handle city production and resource generation
         this.processCityProduction(playerId);
-        
+
         // Handle resource generation
         this.processResourceGeneration(playerId);
-        
+
         // Notify observers
         this.gameState.notifyObservers('turnStarted', { playerId, player });
-        
+
         console.log(`Turn start processing complete for ${player.name}`);
     }
-    
+
     /**
      * Process unit maintenance for a player
      * @param {number} playerId - Player ID
      */
     processUnitMaintenance(playerId) {
         const units = this.gameState.getPlayerUnits(playerId);
-        
+
         for (const unit of units) {
             // Reset unit actions
             unit.hasActed = false;
-            
+
             // Handle hero-specific maintenance
             if (unit.type === 'HERO') {
                 // Restore mana for heroes
                 const manaRegen = SpellGenerator.calculateManaRegeneration(unit);
                 unit.restoreMana(manaRegen);
-                
+
                 console.log(`Hero ${unit.heroName} restored ${manaRegen} mana`);
             }
-            
+
             // TODO: Add healing logic when health system is implemented
             // TODO: Add upkeep costs when economy system is expanded
         }
-        
+
         console.log(`Processed maintenance for ${units.length} units`);
     }
-    
+
     /**
      * Process city production for a player
      * @param {number} playerId - Player ID
      */
     processCityProduction(playerId) {
         const cities = this.gameState.getPlayerCities(playerId);
-        
+
         for (const city of cities) {
             // TODO: Process city production when city system is fully implemented
             // For now, just log the processing
             console.log(`Processing production for city ${city.name || city.id}`);
         }
-        
+
         console.log(`Processed production for ${cities.length} cities`);
     }
-    
+
     /**
      * Process resource generation for a player
      * @param {number} playerId - Player ID
@@ -226,17 +226,17 @@ export class GameManager {
     processResourceGeneration(playerId) {
         const player = this.gameState.getPlayer(playerId);
         if (!player) return;
-        
+
         // Generate base income
         const baseIncome = 10; // Base gold per turn
         const cityIncome = this.gameState.getPlayerCities(playerId).length * 5; // Gold per city
         const totalIncome = baseIncome + cityIncome;
-        
+
         player.addGold(totalIncome);
-        
+
         console.log(`Generated ${totalIncome} gold for ${player.name}`);
     }
-    
+
     /**
      * End the current player's turn
      */
@@ -245,42 +245,42 @@ export class GameManager {
             console.error('Cannot end turn - game not in playing state');
             return;
         }
-        
+
         const currentPlayer = this.gameState.getPlayer(this.currentPlayer);
         if (!currentPlayer) {
             console.error('Current player not found');
             return;
         }
-        
+
         console.log(`Ending turn for player ${currentPlayer.name}`);
-        
+
         // Process turn end activities
         this.processTurnEnd(this.currentPlayer);
-        
+
         // Check for player eliminations
         this.checkAllPlayersForElimination();
-        
+
         // Check victory conditions before moving to next player
         if (this.checkVictoryConditions()) {
             return; // Game ended
         }
-        
+
         // Move to next player
         const nextPlayer = this.getNextPlayer();
-        
+
         // Check if we completed a full round
         if (nextPlayer === 0) {
             // New round started
             this.gameState.incrementTurn();
             console.log(`New round started - Turn ${this.gameState.getCurrentTurn()}`);
-            
+
             // Process round start activities
             this.processRoundStart();
         }
-        
+
         this.startTurn(nextPlayer);
     }
-    
+
     /**
      * Process turn end activities for a player
      * @param {number} playerId - Player ID
@@ -288,42 +288,42 @@ export class GameManager {
     processTurnEnd(playerId) {
         const player = this.gameState.getPlayer(playerId);
         if (!player) return;
-        
+
         console.log(`Processing turn end for ${player.name}`);
-        
+
         // Mark player as having acted this turn
         player.hasActed = true;
-        
+
         // TODO: Process end-of-turn effects when implemented
         // - Unit abilities that trigger at turn end
         // - City effects that happen at turn end
         // - Spell effects that expire
-        
+
         // Notify observers
         this.gameState.notifyObservers('turnEnded', { playerId, player });
-        
+
         console.log(`Turn end processing complete for ${player.name}`);
     }
-    
+
     /**
      * Process round start activities
      */
     processRoundStart() {
         console.log(`Processing round start for turn ${this.gameState.getCurrentTurn()}`);
-        
+
         // TODO: Process global effects that happen each round
         // - Global spell effects
         // - Environmental changes
         // - Random events
-        
+
         // Notify observers
-        this.gameState.notifyObservers('roundStarted', { 
-            turn: this.gameState.getCurrentTurn() 
+        this.gameState.notifyObservers('roundStarted', {
+            turn: this.gameState.getCurrentTurn()
         });
-        
+
         console.log('Round start processing complete');
     }
-    
+
     /**
      * Get the next player in turn order
      * @returns {number} - Next player ID
@@ -331,22 +331,48 @@ export class GameManager {
     getNextPlayer() {
         const players = this.gameState.getPlayers();
         let nextPlayer = (this.currentPlayer + 1) % players.length;
-        
+
         // Skip eliminated players
         let attempts = 0;
         while (this.gameState.isPlayerEliminated(nextPlayer) && attempts < players.length) {
             nextPlayer = (nextPlayer + 1) % players.length;
             attempts++;
         }
-        
+
         // If all players are eliminated except current, game should end
         if (attempts >= players.length - 1) {
             console.warn('Only one or no players remaining');
         }
-        
+
         return nextPlayer;
     }
-    
+
+    /**
+     * Process AI turn
+     * @param {number} playerId - AI player ID
+     */
+    async processAITurn(playerId) {
+        if (!this.aiEngine) {
+            console.error('AI Engine not initialized');
+            this.endTurn();
+            return;
+        }
+
+        console.log(`Processing AI turn for player ${playerId}`);
+
+        try {
+            // Processing logic delegated to AIEngine
+            await this.aiEngine.processAITurn(playerId);
+
+            // End turn after AI is done
+            this.endTurn();
+        } catch (error) {
+            console.error(`Error during AI turn for player ${playerId}:`, error);
+            // Ensure turn ends even if AI errors out to prevent softlock
+            this.endTurn();
+        }
+    }
+
     /**
      * Process an action from the player or AI
      * @param {Object} action - Action object to process
@@ -356,23 +382,23 @@ export class GameManager {
             console.error('Cannot process action - game not in playing state');
             return false;
         }
-        
+
         console.log('Processing action:', action);
-        
+
         try {
             switch (action.type) {
                 case 'CAST_SPELL':
                     return this.processCastSpellAction(action);
-                    
+
                 case 'USE_ITEM':
                     return this.processUseItemAction(action);
-                    
+
                 case 'EQUIP_ITEM':
                     return this.processEquipItemAction(action);
-                    
+
                 case 'EXPLORE_LOCATION':
                     return this.processExploreLocationAction(action);
-                    
+
                 default:
                     console.warn('Unknown action type:', action.type);
                     return false;
@@ -382,7 +408,7 @@ export class GameManager {
             return false;
         }
     }
-    
+
     /**
      * Process spell casting action
      * @param {Object} action - Spell casting action
@@ -390,20 +416,20 @@ export class GameManager {
      */
     processCastSpellAction(action) {
         const { heroId, spellId, targetId, targetX, targetY } = action;
-        
+
         // Get the hero
         const hero = this.gameState.getUnit(heroId);
         if (!hero || hero.type !== 'HERO') {
             console.error('Invalid hero for spell casting');
             return false;
         }
-        
+
         // Check if it's the hero's owner's turn
         if (hero.owner !== this.currentPlayer) {
             console.error('Not the hero owner\'s turn');
             return false;
         }
-        
+
         // Get target (if specified)
         let target = null;
         if (targetId) {
@@ -412,29 +438,29 @@ export class GameManager {
             // Target is a location
             target = { x: targetX, y: targetY };
         }
-        
+
         // Cast the spell
         const result = hero.castSpell(spellId, target, this.gameState.getMap());
-        
+
         if (result.success) {
             console.log(`${hero.heroName} successfully cast ${result.spell.name}`);
-            
+
             // Apply spell effects to game state
             this.applySpellEffects(result);
-            
+
             // Update UI
             this.updateUI();
-            
+
             // Notify observers
             this.gameState.notifyObservers('spellCast', result);
-            
+
             return true;
         } else {
             console.warn(`Spell casting failed: ${result.reason}`);
             return false;
         }
     }
-    
+
     /**
      * Process item usage action
      * @param {Object} action - Item usage action
@@ -442,39 +468,39 @@ export class GameManager {
      */
     processUseItemAction(action) {
         const { heroId, itemId } = action;
-        
+
         // Get the hero
         const hero = this.gameState.getUnit(heroId);
         if (!hero || hero.type !== 'HERO') {
             console.error('Invalid hero for item usage');
             return false;
         }
-        
+
         // Check if it's the hero's owner's turn
         if (hero.owner !== this.currentPlayer) {
             console.error('Not the hero owner\'s turn');
             return false;
         }
-        
+
         // Use the item
         const result = hero.useItem(itemId);
-        
+
         if (result.success) {
             console.log(`${hero.heroName} successfully used item`);
-            
+
             // Update UI
             this.updateUI();
-            
+
             // Notify observers
             this.gameState.notifyObservers('itemUsed', { hero, result });
-            
+
             return true;
         } else {
             console.warn(`Item usage failed: ${result.reason}`);
             return false;
         }
     }
-    
+
     /**
      * Process item equipping action
      * @param {Object} action - Item equipping action
@@ -482,20 +508,20 @@ export class GameManager {
      */
     processEquipItemAction(action) {
         const { heroId, itemId } = action;
-        
+
         // Get the hero
         const hero = this.gameState.getUnit(heroId);
         if (!hero || hero.type !== 'HERO') {
             console.error('Invalid hero for item equipping');
             return false;
         }
-        
+
         // Check if it's the hero's owner's turn
         if (hero.owner !== this.currentPlayer) {
             console.error('Not the hero owner\'s turn');
             return false;
         }
-        
+
         // Find the item (this would need to be expanded based on where items come from)
         // For now, assume the item is already in hero's inventory
         const item = hero.items.find(i => i.id === itemId);
@@ -503,26 +529,26 @@ export class GameManager {
             console.error('Item not found in hero inventory');
             return false;
         }
-        
+
         // Equip the item
         const success = hero.equipItem(item);
-        
+
         if (success) {
             console.log(`${hero.heroName} successfully equipped ${item.name}`);
-            
+
             // Update UI
             this.updateUI();
-            
+
             // Notify observers
             this.gameState.notifyObservers('itemEquipped', { hero, item });
-            
+
             return true;
         } else {
             console.warn('Item equipping failed');
             return false;
         }
     }
-    
+
     /**
      * Process location exploration action
      * @param {Object} action - Location exploration action
@@ -530,37 +556,37 @@ export class GameManager {
      */
     processExploreLocationAction(action) {
         const { heroId, locationType } = action;
-        
+
         // Get the hero
         const hero = this.gameState.getUnit(heroId);
         if (!hero || hero.type !== 'HERO') {
             console.error('Invalid hero for location exploration');
             return false;
         }
-        
+
         // Check if it's the hero's owner's turn
         if (hero.owner !== this.currentPlayer) {
             console.error('Not the hero owner\'s turn');
             return false;
         }
-        
+
         // Import ItemGenerator dynamically to avoid circular dependencies
         import('./ItemGenerator.js').then(({ ItemGenerator }) => {
             const result = ItemGenerator.exploreLocation(hero, locationType);
-            
+
             if (result.success && result.found) {
                 if (result.rewardType === 'item' && result.reward) {
                     hero.equipItem(result.reward);
                 } else if (result.rewardType === 'spell' && result.reward) {
                     hero.learnSpell(result.reward);
                 }
-                
+
                 // Show message to player
                 this.showMessage(result.message);
-                
+
                 // Update UI
                 this.updateUI();
-                
+
                 // Notify observers
                 this.gameState.notifyObservers('locationExplored', { hero, result });
             } else if (result.success) {
@@ -570,10 +596,10 @@ export class GameManager {
         }).catch(error => {
             console.error('Failed to process exploration:', error);
         });
-        
+
         return true;
     }
-    
+
     /**
      * Apply spell effects to the game state
      * @param {Object} spellResult - Result from casting a spell
@@ -582,37 +608,37 @@ export class GameManager {
         if (!spellResult.success || !spellResult.effects) {
             return;
         }
-        
+
         for (const effect of spellResult.effects) {
             switch (effect.type) {
                 case 'damage':
                     if (effect.target && effect.target.takeDamage) {
                         console.log(`${effect.target.name || effect.target.id} takes ${effect.amount} damage from ${effect.spell}`);
-                        
+
                         // Check if target is destroyed
                         if (effect.target.health <= 0) {
                             this.handleUnitDestroyed(effect.target);
                         }
                     }
                     break;
-                    
+
                 case 'healing':
                     if (effect.target && effect.target.heal) {
                         console.log(`${effect.target.name || effect.target.id} healed for ${effect.amount} by ${effect.spell}`);
                     }
                     break;
-                    
+
                 case 'buff':
                     // Apply temporary buff (simplified - would need proper buff system)
                     console.log(`${effect.target.name || effect.target.id} buffed with +${effect.amount} ${effect.stat} for ${effect.duration} turns`);
                     break;
-                    
+
                 case 'area_damage':
                     // Handle area damage (simplified)
                     console.log(`Area damage from ${effect.spell} at (${effect.center.x}, ${effect.center.y})`);
                     this.applyAreaDamage(effect.center, effect.radius, effect.damage);
                     break;
-                    
+
                 case 'teleport':
                     console.log(`${effect.target.name || effect.target.id} can teleport up to ${effect.range} hexes`);
                     // Would need UI interaction to select destination
@@ -620,7 +646,7 @@ export class GameManager {
             }
         }
     }
-    
+
     /**
      * Apply area damage to units in range
      * @param {Object} center - Center point {x, y}
@@ -630,47 +656,47 @@ export class GameManager {
     applyAreaDamage(center, radius, damage) {
         const map = this.gameState.getMap();
         if (!map) return;
-        
+
         // Get all units within radius
         const allUnits = Array.from(this.gameState.getUnits().values());
-        
+
         for (const unit of allUnits) {
             const distance = map.getDistance(center.x, center.y, unit.x, unit.y);
-            
+
             if (distance <= radius) {
                 console.log(`${unit.name || unit.id} takes ${damage} area damage`);
                 unit.takeDamage(damage);
-                
+
                 if (unit.health <= 0) {
                     this.handleUnitDestroyed(unit);
                 }
             }
         }
     }
-    
+
     /**
      * Handle unit destruction
      * @param {Object} unit - Destroyed unit
      */
     handleUnitDestroyed(unit) {
         console.log(`Unit ${unit.name || unit.id} has been destroyed`);
-        
+
         // Remove unit from game state
         this.gameState.removeUnit(unit.id);
-        
+
         // Update player statistics
         const owner = this.gameState.getPlayer(unit.owner);
         if (owner) {
             owner.stats.unitsLost++;
         }
-        
+
         // Notify observers
         this.gameState.notifyObservers('unitDestroyed', { unit });
-        
+
         // Check for player elimination
         this.checkPlayerElimination(unit.owner);
     }
-    
+
     /**
      * Check if victory conditions are met
      * @returns {boolean} - True if game should end
@@ -679,51 +705,51 @@ export class GameManager {
         if (!this.gameState) {
             return false;
         }
-        
+
         console.log('Checking victory conditions...');
-        
+
         const activePlayers = this.gameState.getActivePlayers();
-        
+
         // Check if only one player remains (elimination victory)
         if (activePlayers.length <= 1) {
             const winner = activePlayers.length === 1 ? activePlayers[0] : null;
             this.handleGameEnd(winner, 'elimination');
             return true;
         }
-        
+
         // Check city conquest victory
         const cityConquestWinner = this.checkCityConquestVictory();
         if (cityConquestWinner) {
             this.handleGameEnd(cityConquestWinner, 'city_conquest');
             return true;
         }
-        
+
         // Check total domination victory (all enemy units eliminated)
         const dominationWinner = this.checkDominationVictory();
         if (dominationWinner) {
             this.handleGameEnd(dominationWinner, 'domination');
             return true;
         }
-        
+
         // TODO: Add other victory conditions when implemented
         // - Economic victory (accumulate X gold)
         // - Artifact victory (collect special items)
         // - Time victory (survive X turns)
-        
+
         return false;
     }
-    
+
     /**
      * Check for city conquest victory condition
      * @returns {Object|null} - Winning player or null
      */
     checkCityConquestVictory() {
         const allCities = Array.from(this.gameState.getCities().values());
-        
+
         if (allCities.length === 0) {
             return null; // No cities to conquer
         }
-        
+
         // Group cities by owner
         const citiesByOwner = new Map();
         for (const city of allCities) {
@@ -732,32 +758,32 @@ export class GameManager {
             }
             citiesByOwner.get(city.owner).push(city);
         }
-        
+
         // Check if one player owns all cities
         if (citiesByOwner.size === 1) {
             const [ownerId] = citiesByOwner.keys();
             const winner = this.gameState.getPlayer(ownerId);
-            
+
             if (winner && !winner.isEliminated) {
                 console.log(`City conquest victory: ${winner.name} owns all ${allCities.length} cities`);
                 return winner;
             }
         }
-        
+
         return null;
     }
-    
+
     /**
      * Check for domination victory condition (all enemy units eliminated)
      * @returns {Object|null} - Winning player or null
      */
     checkDominationVictory() {
         const allUnits = Array.from(this.gameState.getUnits().values());
-        
+
         if (allUnits.length === 0) {
             return null; // No units exist
         }
-        
+
         // Group units by owner
         const unitsByOwner = new Map();
         for (const unit of allUnits) {
@@ -766,23 +792,23 @@ export class GameManager {
             }
             unitsByOwner.get(unit.owner).push(unit);
         }
-        
+
         // Check if only one player has units remaining
         const playersWithUnits = Array.from(unitsByOwner.keys())
             .filter(playerId => {
                 const player = this.gameState.getPlayer(playerId);
                 return player && !player.isEliminated;
             });
-        
+
         if (playersWithUnits.length === 1) {
             const winner = this.gameState.getPlayer(playersWithUnits[0]);
             console.log(`Domination victory: ${winner.name} has eliminated all enemy units`);
             return winner;
         }
-        
+
         return null;
     }
-    
+
     /**
      * Check if a player should be eliminated
      * @param {number} playerId - Player ID to check
@@ -793,42 +819,42 @@ export class GameManager {
         if (!player || player.isEliminated) {
             return false; // Already eliminated or doesn't exist
         }
-        
+
         const playerUnits = this.gameState.getPlayerUnits(playerId);
         const playerCities = this.gameState.getPlayerCities(playerId);
-        
+
         // Player is eliminated if they have no units and no cities
         // BUT only if the game has actually started with units/cities
         const totalUnits = this.gameState.getUnits().size;
         const totalCities = this.gameState.getCities().size;
-        
+
         // Don't eliminate players if no units or cities exist in the game yet
         if (totalUnits === 0 && totalCities === 0) {
             return false;
         }
-        
+
         if (playerUnits.length === 0 && playerCities.length === 0) {
             console.log(`Player ${player.name} should be eliminated - no units or cities remaining`);
             this.gameState.eliminatePlayer(playerId);
             return true;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Check all players for elimination
      */
     checkAllPlayersForElimination() {
         const players = this.gameState.getPlayers();
-        
+
         for (const player of players) {
             if (!player.isEliminated) {
                 this.checkPlayerElimination(player.id);
             }
         }
     }
-    
+
     /**
      * Handle game end
      * @param {Object} winner - Winning player or null for draw
@@ -836,27 +862,27 @@ export class GameManager {
      */
     handleGameEnd(winner, victoryType = 'unknown') {
         console.log(`Game ended. Victory type: ${victoryType}. Winner:`, winner);
-        
+
         this.gamePhase = 'ENDED';
-        
+
         // Calculate game statistics
         const gameStats = this.calculateGameStatistics();
-        
+
         // Update UI to show game end
         this.updateUI();
-        
+
         // Show victory screen
         this.showVictoryScreen(winner, victoryType, gameStats);
-        
+
         // Notify observers
-        this.gameState.notifyObservers('gameEnded', { 
-            winner, 
-            victoryType, 
+        this.gameState.notifyObservers('gameEnded', {
+            winner,
+            victoryType,
             gameStats,
             turn: this.gameState.getCurrentTurn()
         });
     }
-    
+
     /**
      * Calculate game statistics
      * @returns {Object} - Game statistics
@@ -870,12 +896,12 @@ export class GameManager {
             totalUnits: this.gameState.getUnits().size,
             totalCities: this.gameState.getCities().size
         };
-        
+
         // Calculate individual player statistics
         for (const player of players) {
             const playerUnits = this.gameState.getPlayerUnits(player.id);
             const playerCities = this.gameState.getPlayerCities(player.id);
-            
+
             stats.playerStats.push({
                 id: player.id,
                 name: player.name,
@@ -894,10 +920,10 @@ export class GameManager {
                 winLossRatio: player.getWinLossRatio()
             });
         }
-        
+
         return stats;
     }
-    
+
     /**
      * Show victory screen with game statistics
      * @param {Object} winner - Winning player or null
@@ -910,7 +936,7 @@ export class GameManager {
             console.log(`GAME OVER - ${winner ? `${winner.name} wins` : 'Draw'} (${victoryType})`);
             return;
         }
-        
+
         // Create victory screen overlay
         const overlay = document.createElement('div');
         overlay.style.cssText = `
@@ -925,7 +951,7 @@ export class GameManager {
             justify-content: center;
             align-items: center;
         `;
-        
+
         // Create victory screen content
         const victoryScreen = document.createElement('div');
         victoryScreen.style.cssText = `
@@ -939,10 +965,10 @@ export class GameManager {
             overflow-y: auto;
             box-shadow: 0 4px 20px rgba(0,0,0,0.5);
         `;
-        
+
         // Victory message
         const victoryMessage = this.getVictoryMessage(winner, victoryType);
-        
+
         victoryScreen.innerHTML = `
             <h1 style="color: ${winner ? winner.color : '#ecf0f1'}; margin-bottom: 20px;">
                 ${winner ? `${winner.name} Wins!` : 'Game Over - Draw'}
@@ -973,25 +999,25 @@ export class GameManager {
                 </button>
             </div>
         `;
-        
+
         overlay.appendChild(victoryScreen);
         document.body.appendChild(overlay);
-        
+
         // Add event listeners
         document.getElementById('save-results-btn').addEventListener('click', () => {
             this.saveGameResults(gameStats);
         });
-        
+
         document.getElementById('new-game-btn').addEventListener('click', () => {
             document.body.removeChild(overlay);
             this.startNewGame();
         });
-        
+
         document.getElementById('close-victory-btn').addEventListener('click', () => {
             document.body.removeChild(overlay);
         });
     }
-    
+
     /**
      * Get victory message based on victory type
      * @param {Object} winner - Winning player
@@ -1002,7 +1028,7 @@ export class GameManager {
         if (!winner) {
             return 'The game ended in a draw';
         }
-        
+
         switch (victoryType) {
             case 'city_conquest':
                 return 'Victory by capturing all enemy cities!';
@@ -1014,7 +1040,7 @@ export class GameManager {
                 return 'Victory achieved!';
         }
     }
-    
+
     /**
      * Format game duration for display
      * @param {number} duration - Duration in milliseconds
@@ -1025,7 +1051,7 @@ export class GameManager {
         const seconds = Math.floor((duration % 60000) / 1000);
         return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }
-    
+
     /**
      * Format player statistics for display
      * @param {Array} playerStats - Array of player statistics
@@ -1049,23 +1075,23 @@ export class GameManager {
             </div>
         `).join('');
     }
-    
+
     /**
      * Save game results to local storage
      * @param {Object} gameStats - Game statistics
      */
     saveGameResults(gameStats) {
         const result = saveLoadManager.saveGameResults(gameStats);
-        
+
         if (result.success) {
             this.showMessage(result.message);
         } else {
             this.showMessage(result.message, 'error');
         }
-        
+
         return result;
     }
-    
+
     /**
      * Start a new game
      */
@@ -1074,7 +1100,7 @@ export class GameManager {
         this.gamePhase = 'SETUP';
         this.currentPlayer = 0;
         this.gameStartTime = Date.now();
-        
+
         // TODO: Show new game setup screen
         // For now, just reinitialize with default config
         const defaultConfig = {
@@ -1089,10 +1115,10 @@ export class GameManager {
                 { id: 2, name: 'AI 2', faction: 'DEMONS', color: '#CC0066', isAI: true }
             ]
         };
-        
+
         this.initializeGame(defaultConfig);
     }
-    
+
     /**
      * Process AI turn
      * @param {number} playerId - AI player ID
@@ -1103,17 +1129,17 @@ export class GameManager {
             console.error('Invalid AI player for AI turn processing');
             return;
         }
-        
+
         console.log(`Processing AI turn for player ${player.name}`);
-        
+
         // Show AI thinking indicator
         this.showAIThinking(player);
-        
+
         // Use AIEngine to process the turn
         if (this.aiEngine) {
             this.aiEngine.processAITurn(playerId).then(() => {
                 this.hideAIThinking();
-                
+
                 // End AI turn after processing
                 setTimeout(() => {
                     this.endTurn();
@@ -1121,7 +1147,7 @@ export class GameManager {
             }).catch(error => {
                 console.error('AI turn processing failed:', error);
                 this.hideAIThinking();
-                
+
                 // Still end turn even if AI fails
                 setTimeout(() => {
                     this.endTurn();
@@ -1131,14 +1157,14 @@ export class GameManager {
             // Fallback to old behavior if AIEngine not available
             this.executeAIActions(playerId);
             this.hideAIThinking();
-            
+
             // End AI turn after processing
             setTimeout(() => {
                 this.endTurn();
             }, 500);
         }
     }
-    
+
     /**
      * Execute AI actions for a turn
      * @param {number} playerId - AI player ID
@@ -1146,25 +1172,25 @@ export class GameManager {
     executeAIActions(playerId) {
         const player = this.gameState.getPlayer(playerId);
         console.log(`Executing AI actions for ${player.name}`);
-        
+
         // TODO: Implement actual AI decision making
         // For now, just log that AI is taking actions
-        
+
         const units = this.gameState.getPlayerUnits(playerId);
         const cities = this.gameState.getPlayerCities(playerId);
-        
+
         console.log(`AI ${player.name} has ${units.length} units and ${cities.length} cities`);
-        
+
         // Simulate some AI actions
         if (units.length > 0) {
             console.log(`AI ${player.name} is moving units`);
         }
-        
+
         if (cities.length > 0) {
             console.log(`AI ${player.name} is managing cities`);
         }
     }
-    
+
     /**
      * Show AI thinking indicator
      * @param {Object} player - AI player
@@ -1174,7 +1200,7 @@ export class GameManager {
         if (typeof document === 'undefined') {
             return;
         }
-        
+
         const currentPlayerElement = document.getElementById('current-player');
         if (currentPlayerElement) {
             currentPlayerElement.textContent = `${player.name} (Thinking...)`;
@@ -1182,7 +1208,7 @@ export class GameManager {
             currentPlayerElement.style.fontStyle = 'italic';
         }
     }
-    
+
     /**
      * Hide AI thinking indicator
      */
@@ -1191,13 +1217,13 @@ export class GameManager {
         if (typeof document === 'undefined') {
             return;
         }
-        
+
         const currentPlayerElement = document.getElementById('current-player');
         if (currentPlayerElement) {
             currentPlayerElement.style.fontStyle = 'normal';
         }
     }
-    
+
     /**
      * Save the current game state to a specific slot
      * @param {number} slotId - Save slot ID (0-9)
@@ -1212,10 +1238,10 @@ export class GameManager {
                 message: 'Game not initialized'
             };
         }
-        
+
         try {
             const result = saveLoadManager.saveGame(this.gameState, this, slotId, saveName);
-            
+
             if (result.success) {
                 console.log('Game saved successfully');
                 this.showMessage(result.message);
@@ -1223,14 +1249,14 @@ export class GameManager {
                 console.error('Failed to save game:', result.message);
                 this.showMessage(result.message, 'error');
             }
-            
+
             return result;
-            
+
         } catch (error) {
             console.error('Failed to save game:', error);
             const errorMessage = 'Failed to save game!';
             this.showMessage(errorMessage, 'error');
-            
+
             return {
                 success: false,
                 message: errorMessage,
@@ -1238,7 +1264,7 @@ export class GameManager {
             };
         }
     }
-    
+
     /**
      * Load a saved game from a specific slot
      * @param {number} slotId - Save slot ID to load from
@@ -1247,61 +1273,61 @@ export class GameManager {
     loadGame(slotId = 0) {
         try {
             const result = saveLoadManager.loadGame(slotId);
-            
+
             if (!result.success) {
                 console.error('Failed to load game:', result.message);
                 this.showMessage(result.message, 'error');
                 return result;
             }
-            
+
             const saveData = result.saveData;
-            
+
             // Validate save data
             if (!saveData.gameState || !saveData.gameManager) {
                 throw new Error('Invalid save data structure');
             }
-            
+
             // Initialize engines if not already done
             if (!this.renderEngine && this.canvasId) {
                 this.renderEngine = new RenderEngine(this.canvasId);
             }
-            
+
             if (!this.inputEngine) {
                 this.inputEngine = new InputEngine(this);
             }
-            
+
             if (!this.aiEngine) {
                 this.aiEngine = new AIEngine(null); // Will be set when gameState is restored
             }
-            
+
             // Create new game state and deserialize
             this.gameState = new GameState();
             this.gameState.deserialize(saveData.gameState);
-            
+
             // Update AI engine with new game state
             if (this.aiEngine) {
                 this.aiEngine.gameState = this.gameState;
             }
-            
+
             // Restore game manager state
             this.currentPlayer = saveData.gameManager.currentPlayer || 0;
             this.gamePhase = saveData.gameManager.gamePhase || 'PLAYING';
             this.gameStartTime = saveData.gameManager.gameStartTime || Date.now();
             this.isInitialized = true;
-            
+
             // Update UI
             this.updateUI();
-            
+
             console.log('Game loaded successfully');
             this.showMessage(result.message);
-            
+
             return result;
-            
+
         } catch (error) {
             console.error('Failed to load game:', error);
             const errorMessage = 'Failed to load game!';
             this.showMessage(errorMessage, 'error');
-            
+
             return {
                 success: false,
                 message: errorMessage,
@@ -1309,7 +1335,7 @@ export class GameManager {
             };
         }
     }
-    
+
     /**
      * Delete a save from a specific slot
      * @param {number} slotId - Save slot ID to delete
@@ -1318,20 +1344,20 @@ export class GameManager {
     deleteSave(slotId) {
         try {
             const result = saveLoadManager.deleteSave(slotId);
-            
+
             if (result.success) {
                 this.showMessage(result.message);
             } else {
                 this.showMessage(result.message, 'error');
             }
-            
+
             return result;
-            
+
         } catch (error) {
             console.error('Failed to delete save:', error);
             const errorMessage = 'Failed to delete save!';
             this.showMessage(errorMessage, 'error');
-            
+
             return {
                 success: false,
                 message: errorMessage,
@@ -1339,7 +1365,7 @@ export class GameManager {
             };
         }
     }
-    
+
     /**
      * Get information about all save slots
      * @returns {Array} - Array of save slot information
@@ -1347,7 +1373,7 @@ export class GameManager {
     getSaveSlots() {
         return saveLoadManager.getSaveSlots();
     }
-    
+
     /**
      * Get storage usage information
      * @returns {Object} - Storage usage data
@@ -1355,7 +1381,7 @@ export class GameManager {
     getStorageInfo() {
         return saveLoadManager.getStorageInfo();
     }
-    
+
     /**
      * Show save dialog
      */
@@ -1364,7 +1390,7 @@ export class GameManager {
             this.showMessage('Cannot save - game not initialized', 'error');
             return;
         }
-        
+
         if (this.saveLoadUI) {
             this.saveLoadUI.showDialog('save');
         } else {
@@ -1372,7 +1398,7 @@ export class GameManager {
             this.saveGame(0);
         }
     }
-    
+
     /**
      * Show load dialog
      */
@@ -1384,7 +1410,7 @@ export class GameManager {
             this.loadGame(0);
         }
     }
-    
+
     /**
      * Quick save to first available slot
      */
@@ -1393,7 +1419,7 @@ export class GameManager {
             this.showMessage('Cannot save - game not initialized', 'error');
             return;
         }
-        
+
         if (this.saveLoadUI) {
             this.saveLoadUI.showQuickSave();
         } else {
@@ -1401,7 +1427,7 @@ export class GameManager {
             this.saveGame(0, 'Quick Save');
         }
     }
-    
+
     /**
      * Quick load from most recent save
      */
@@ -1413,7 +1439,7 @@ export class GameManager {
             this.loadGame(0);
         }
     }
-    
+
     /**
      * Update the user interface
      */
@@ -1422,7 +1448,7 @@ export class GameManager {
         if (typeof document === 'undefined') {
             return;
         }
-        
+
         // Update current player display (legacy element)
         const currentPlayerElement = document.getElementById('current-player');
         if (currentPlayerElement && this.gameState) {
@@ -1432,7 +1458,7 @@ export class GameManager {
                 currentPlayerElement.style.color = player.color;
             }
         }
-        
+
         // Update new current player name element
         const currentPlayerNameElement = document.getElementById('current-player-name');
         if (currentPlayerNameElement && this.gameState) {
@@ -1442,31 +1468,31 @@ export class GameManager {
                 currentPlayerNameElement.style.color = player.color;
             }
         }
-        
+
         // Update turn counter (legacy element)
         const turnCounterElement = document.getElementById('turn-counter');
         if (turnCounterElement && this.gameState) {
             turnCounterElement.textContent = `Turn: ${this.gameState.getCurrentTurn()}`;
         }
-        
+
         // Update new turn number element
         const turnNumberElement = document.getElementById('turn-number');
         if (turnNumberElement && this.gameState) {
             turnNumberElement.textContent = this.gameState.getCurrentTurn();
         }
-        
+
         // Update game phase element
         const gamePhaseElement = document.getElementById('game-phase');
         if (gamePhaseElement) {
             gamePhaseElement.textContent = this.gamePhase;
         }
-        
+
         // Update button states
         const endTurnBtn = document.getElementById('end-turn-btn');
         if (endTurnBtn) {
             const currentPlayer = this.gameState ? this.gameState.getPlayer(this.currentPlayer) : null;
             endTurnBtn.disabled = this.gamePhase !== 'PLAYING' || (currentPlayer && currentPlayer.isAI);
-            
+
             // Update button text for AI turns
             if (currentPlayer && currentPlayer.isAI) {
                 endTurnBtn.textContent = `${currentPlayer.name} is thinking...`;
@@ -1474,11 +1500,11 @@ export class GameManager {
                 endTurnBtn.textContent = 'End Turn';
             }
         }
-        
+
         // Trigger render
         this.render();
     }
-    
+
     /**
      * Render the game
      */
@@ -1487,7 +1513,7 @@ export class GameManager {
             this.renderEngine.render(this.gameState);
         }
     }
-    
+
     /**
      * Show a message to the user
      * @param {string} message - Message to show
@@ -1499,7 +1525,7 @@ export class GameManager {
             console.log(`[${type.toUpperCase()}] ${message}`);
             return;
         }
-        
+
         const messageDiv = document.createElement('div');
         messageDiv.style.cssText = `
             position: fixed;
@@ -1514,9 +1540,9 @@ export class GameManager {
             box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         `;
         messageDiv.textContent = message;
-        
+
         document.body.appendChild(messageDiv);
-        
+
         // Remove message after 3 seconds
         setTimeout(() => {
             if (messageDiv.parentNode) {
@@ -1524,28 +1550,28 @@ export class GameManager {
             }
         }, 3000);
     }
-    
+
     // Getters
     getCurrentPlayer() {
         return this.currentPlayer;
     }
-    
+
     getGamePhase() {
         return this.gamePhase;
     }
-    
+
     getGameState() {
         return this.gameState;
     }
-    
+
     isGameInitialized() {
         return this.isInitialized;
     }
-    
+
     getRenderEngine() {
         return this.renderEngine;
     }
-    
+
     getInputEngine() {
         return this.inputEngine;
     }

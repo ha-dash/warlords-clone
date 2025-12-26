@@ -8,7 +8,7 @@ export class InputEngine {
         this.gameManager = gameManager;
         this.renderEngine = gameManager.getRenderEngine();
         this.gameState = gameManager.getGameState();
-        
+
         // Input state
         this.selectedUnit = null;
         this.hoveredHex = null;
@@ -16,7 +16,7 @@ export class InputEngine {
         this.lastMousePos = { x: 0, y: 0 };
         this.dragStartPos = { x: 0, y: 0 };
         this.contextMenuVisible = false;
-        
+
         // Keyboard shortcuts configuration
         this.keyboardShortcuts = {
             // Camera controls
@@ -28,13 +28,13 @@ export class InputEngine {
             'ArrowLeft': () => this.moveCameraLeft(),
             'ArrowDown': () => this.moveCameraDown(),
             'ArrowRight': () => this.moveCameraRight(),
-            
+
             // Zoom controls
             '+': () => this.zoomIn(),
             '=': () => this.zoomIn(),
             '-': () => this.zoomOut(),
             '_': () => this.zoomOut(),
-            
+
             // Game controls
             'Escape': () => this.clearSelection(),
             'Space': () => this.endTurn(),
@@ -42,18 +42,18 @@ export class InputEngine {
             'f': () => this.fitMapToScreen(),
             'Home': () => this.resetCamera(),
             'c': () => this.centerOnSelectedUnit(),
-            
+
             // Unit controls
             'Delete': () => this.deleteSelectedUnit(),
             'Tab': () => this.selectNextUnit(),
             'Shift+Tab': () => this.selectPreviousUnit(),
-            
+
             // Save/Load (Requirement 10.1, 10.2)
             'F5': () => this.quickSave(),
             'F9': () => this.quickLoad(),
             'Ctrl+s': () => this.quickSave(),
             'Ctrl+o': () => this.quickLoad(),
-            
+
             // UI shortcuts
             'h': () => this.toggleHelp(),
             'i': () => this.toggleUnitInfo(),
@@ -63,11 +63,11 @@ export class InputEngine {
             '3': () => this.selectUnitType('CAVALRY'),
             '4': () => this.selectUnitType('HERO')
         };
-        
+
         this.setupEventListeners();
         console.log('InputEngine initialized');
     }
-    
+
     /**
      * Set up all event listeners for input handling
      */
@@ -77,44 +77,44 @@ export class InputEngine {
             console.error('Canvas not found for input handling');
             return;
         }
-        
+
         // Mouse event listeners
         canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
         canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
         canvas.addEventListener('wheel', (e) => this.handleMouseWheel(e));
         canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Disable browser context menu
-        
+
         // Keyboard event listeners
         document.addEventListener('keydown', (e) => this.handleKeyDown(e));
         document.addEventListener('keyup', (e) => this.handleKeyUp(e));
-        
+
         // Window events
         window.addEventListener('resize', () => this.handleWindowResize());
-        
+
         // Hide context menu when clicking elsewhere
         document.addEventListener('click', (e) => this.handleDocumentClick(e));
-        
+
         console.log('Input event listeners set up');
     }
-    
+
     /**
      * Handle mouse down events
      * @param {MouseEvent} event - Mouse event
      */
     handleMouseDown(event) {
         if (!this.renderEngine) return;
-        
+
         const rect = event.target.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const y = event.clientY - rect.top;
-        
+
         this.lastMousePos = { x, y };
         this.dragStartPos = { x, y };
-        
+
         // Hide context menu if visible
         this.hideContextMenu();
-        
+
         if (event.button === 0) { // Left click
             this.handleLeftClick(x, y, event);
         } else if (event.button === 1) { // Middle click - start camera drag
@@ -124,34 +124,34 @@ export class InputEngine {
             this.handleRightClick(x, y, event);
         }
     }
-    
+
     /**
      * Handle mouse move events
      * @param {MouseEvent} event - Mouse event
      */
     handleMouseMove(event) {
         if (!this.renderEngine) return;
-        
+
         const rect = event.target.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const y = event.clientY - rect.top;
-        
+
         // Handle camera dragging
         if (this.isDragging) {
             const dx = x - this.lastMousePos.x;
             const dy = y - this.lastMousePos.y;
-            
+
             // Move camera in opposite direction (drag to pan)
             this.renderEngine.moveCameraBy(-dx / this.renderEngine.camera.zoom, -dy / this.renderEngine.camera.zoom);
             this.gameManager.render();
         }
-        
+
         // Handle hex hovering for terrain information (Requirement 2.4)
         this.handleMouseHover(x, y);
-        
+
         this.lastMousePos = { x, y };
     }
-    
+
     /**
      * Handle mouse up events
      * @param {MouseEvent} event - Mouse event
@@ -161,42 +161,42 @@ export class InputEngine {
             this.isDragging = false;
         }
     }
-    
+
     /**
      * Handle mouse wheel events for zooming
      * @param {WheelEvent} event - Wheel event
      */
     handleMouseWheel(event) {
         if (!this.renderEngine) return;
-        
+
         event.preventDefault();
-        
+
         const zoomFactor = 1.1;
         const rect = event.target.getBoundingClientRect();
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
-        
+
         // Get world position before zoom
         const worldPos = this.renderEngine.screenToWorld(mouseX, mouseY);
-        
+
         // Apply zoom
         if (event.deltaY < 0) {
             this.renderEngine.zoomIn(zoomFactor);
         } else {
             this.renderEngine.zoomOut(zoomFactor);
         }
-        
+
         // Get world position after zoom
         const newWorldPos = this.renderEngine.screenToWorld(mouseX, mouseY);
-        
+
         // Adjust camera to keep mouse position fixed
         const worldDx = worldPos.x - newWorldPos.x;
         const worldDy = worldPos.y - newWorldPos.y;
         this.renderEngine.moveCameraBy(worldDx, worldDy);
-        
+
         this.gameManager.render();
     }
-    
+
     /**
      * Handle left mouse clicks - unit selection and movement (Requirements 3.1, 3.2)
      * @param {number} x - Screen X coordinate
@@ -205,24 +205,24 @@ export class InputEngine {
      */
     handleLeftClick(x, y, event) {
         if (!this.gameState || this.gameManager.getGamePhase() !== 'PLAYING') return;
-        
+
         // Convert screen coordinates to hex coordinates
         const hexCoords = this.renderEngine.screenToHex(x, y);
         const map = this.gameState.getMap();
-        
+
         if (!map || !map.isValidCoordinate(hexCoords.x, hexCoords.y)) {
             return;
         }
-        
+
         const hex = map.getHex(hexCoords.x, hexCoords.y);
         if (!hex) return;
-        
+
         // Check if there's a unit on this hex
         const unit = this.gameState.getUnitAt(hexCoords.x, hexCoords.y);
-        
+
         // Check if there's a city on this hex
         const city = this.gameState.getCityAt(hexCoords.x, hexCoords.y);
-        
+
         if (unit && unit.owner === this.gameManager.getCurrentPlayer()) {
             // Select our own unit (Requirement 3.1)
             this.selectUnit(unit);
@@ -236,10 +236,10 @@ export class InputEngine {
             // Clear selection
             this.clearSelection();
         }
-        
+
         this.gameManager.render();
     }
-    
+
     /**
      * Handle right mouse clicks - context menus (Requirement 9.3)
      * @param {number} x - Screen X coordinate
@@ -250,20 +250,20 @@ export class InputEngine {
         // Convert to hex coordinates
         const hexCoords = this.renderEngine.screenToHex(x, y);
         const map = this.gameState.getMap();
-        
+
         if (!map || !map.isValidCoordinate(hexCoords.x, hexCoords.y)) {
             return;
         }
-        
+
         // Check what's on this hex
         const unit = this.gameState.getUnitAt(hexCoords.x, hexCoords.y);
         const city = this.gameState.getCityAt(hexCoords.x, hexCoords.y);
         const hex = map.getHex(hexCoords.x, hexCoords.y);
-        
+
         // Show context menu with available actions
         this.showContextMenu(x, y, { unit, city, hex, hexCoords });
     }
-    
+
     /**
      * Handle mouse hovering for terrain information display (Requirement 2.4)
      * @param {number} x - Screen X coordinate
@@ -271,34 +271,34 @@ export class InputEngine {
      */
     handleMouseHover(x, y) {
         if (!this.gameState) return;
-        
+
         // Convert screen coordinates to hex coordinates
         const hexCoords = this.renderEngine.screenToHex(x, y);
         const map = this.gameState.getMap();
-        
+
         if (!map || !map.isValidCoordinate(hexCoords.x, hexCoords.y)) {
             this.clearHover();
             return;
         }
-        
+
         const hex = map.getHex(hexCoords.x, hexCoords.y);
         if (!hex) {
             this.clearHover();
             return;
         }
-        
+
         // Update hovered hex if it changed
         if (!this.hoveredHex || this.hoveredHex.x !== hexCoords.x || this.hoveredHex.y !== hexCoords.y) {
             this.hoveredHex = hexCoords;
             this.renderEngine.setHoveredHex(hexCoords.x, hexCoords.y);
-            
+
             // Display terrain information (Requirement 2.4)
             this.displayTerrainInfo(hex, x, y);
-            
+
             this.gameManager.render();
         }
     }
-    
+
     /**
      * Handle keyboard input - shortcuts (Requirement 9.4)
      * @param {KeyboardEvent} event - Keyboard event
@@ -308,27 +308,27 @@ export class InputEngine {
         if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
             return;
         }
-        
+
         // Handle modifier key combinations
         let keyCombo = '';
         if (event.ctrlKey) keyCombo += 'Ctrl+';
         if (event.shiftKey) keyCombo += 'Shift+';
         if (event.altKey) keyCombo += 'Alt+';
         keyCombo += event.key;
-        
+
         // Try the full key combination first
         let shortcut = this.keyboardShortcuts[keyCombo];
         if (!shortcut) {
             // Fall back to just the key
             shortcut = this.keyboardShortcuts[event.key];
         }
-        
+
         if (shortcut) {
             shortcut();
             event.preventDefault();
         }
     }
-    
+
     /**
      * Handle keyboard up events
      * @param {KeyboardEvent} event - Keyboard event
@@ -336,16 +336,16 @@ export class InputEngine {
     handleKeyUp(event) {
         // Currently no specific key up handling needed
     }
-    
+
     /**
      * Handle window resize
      */
     handleWindowResize() {
         if (!this.renderEngine) return;
-        
+
         const canvas = document.getElementById(this.gameManager.canvasId);
         if (!canvas) return;
-        
+
         // Update canvas size to match container
         const container = canvas.parentElement;
         if (container) {
@@ -354,7 +354,7 @@ export class InputEngine {
             this.gameManager.render();
         }
     }
-    
+
     /**
      * Handle document clicks to hide context menu
      * @param {MouseEvent} event - Click event
@@ -367,7 +367,7 @@ export class InputEngine {
             }
         }
     }
-    
+
     /**
      * Select a unit (Requirement 3.1)
      * @param {Unit} unit - Unit to select
@@ -375,19 +375,19 @@ export class InputEngine {
     selectUnit(unit) {
         this.selectedUnit = unit;
         this.renderEngine.setSelectedHex(unit.x, unit.y);
-        
+
         // Show movement range (Requirement 3.2)
         if (this.gameState) {
             const movementRange = this.gameState.getUnitMovementRange(unit);
             this.renderEngine.setHighlightedHexes(movementRange);
         }
-        
+
         // Update unit info display (Requirement 9.2)
         this.displayUnitInfo(unit);
-        
+
         console.log('Selected unit:', unit);
     }
-    
+
     /**
      * Select a city
      * @param {City} city - City to select
@@ -397,13 +397,13 @@ export class InputEngine {
         this.selectedUnit = null;
         this.renderEngine.setSelectedHex(city.x, city.y);
         this.renderEngine.setHighlightedHexes([]);
-        
+
         // Update city info display (Requirement 9.2)
         this.displayCityInfo(city);
-        
+
         console.log('Selected city:', city);
     }
-    
+
     /**
      * Clear current selection
      */
@@ -413,7 +413,7 @@ export class InputEngine {
         this.clearUnitInfo();
         this.clearCityInfo();
     }
-    
+
     /**
      * Clear hover state
      */
@@ -422,7 +422,7 @@ export class InputEngine {
         this.renderEngine.clearHoveredHex();
         this.clearTerrainInfo();
     }
-    
+
     /**
      * Handle unit action (movement or attack) (Requirement 3.2)
      * @param {Unit} unit - Unit to act with
@@ -431,11 +431,11 @@ export class InputEngine {
      */
     handleUnitAction(unit, targetX, targetY) {
         if (!this.gameState) return;
-        
+
         // Check if target is in movement range
         const movementRange = this.gameState.getUnitMovementRange(unit);
         const canMoveTo = movementRange.some(hex => hex.x === targetX && hex.y === targetY);
-        
+
         if (canMoveTo) {
             // Move unit
             const success = this.gameState.moveUnit(unit, targetX, targetY);
@@ -456,7 +456,7 @@ export class InputEngine {
             }
         }
     }
-    
+
     /**
      * Show context menu with available actions (Requirement 9.3)
      * @param {number} x - Screen X coordinate
@@ -466,7 +466,7 @@ export class InputEngine {
     showContextMenu(x, y, context) {
         // Remove existing context menu
         this.hideContextMenu();
-        
+
         const contextMenu = document.createElement('div');
         contextMenu.id = 'context-menu';
         contextMenu.style.cssText = `
@@ -482,12 +482,12 @@ export class InputEngine {
             min-width: 150px;
             font-size: 14px;
         `;
-        
+
         const menuItems = this.getContextMenuItems(context);
-        
+
         menuItems.forEach((item, index) => {
             const menuItem = document.createElement('div');
-            
+
             if (item.label === '---') {
                 // Separator
                 menuItem.style.cssText = `
@@ -505,29 +505,29 @@ export class InputEngine {
                     transition: background-color 0.2s;
                 `;
                 menuItem.textContent = item.label;
-                
+
                 if (item.enabled) {
                     menuItem.addEventListener('click', () => {
                         item.action();
                         this.hideContextMenu();
                     });
-                    
+
                     menuItem.addEventListener('mouseenter', () => {
                         menuItem.style.backgroundColor = '#444';
                     });
-                    
+
                     menuItem.addEventListener('mouseleave', () => {
                         menuItem.style.backgroundColor = 'transparent';
                     });
                 }
             }
-            
+
             contextMenu.appendChild(menuItem);
         });
-        
+
         document.body.appendChild(contextMenu);
         this.contextMenuVisible = true;
-        
+
         // Adjust position if menu goes off screen
         const rect = contextMenu.getBoundingClientRect();
         if (rect.right > window.innerWidth) {
@@ -537,7 +537,7 @@ export class InputEngine {
             contextMenu.style.top = `${y - rect.height}px`;
         }
     }
-    
+
     /**
      * Get context menu items based on context
      * @param {Object} context - Context object
@@ -546,7 +546,7 @@ export class InputEngine {
     getContextMenuItems(context) {
         const items = [];
         const currentPlayer = this.gameManager.getCurrentPlayer();
-        
+
         // Unit actions
         if (context.unit) {
             if (context.unit.owner === currentPlayer) {
@@ -555,33 +555,33 @@ export class InputEngine {
                     enabled: true,
                     action: () => this.selectUnit(context.unit)
                 });
-                
+
                 if (!context.unit.hasActed) {
                     items.push({
                         label: 'Move Unit',
                         enabled: true,
                         action: () => this.selectUnit(context.unit)
                     });
-                    
+
                     items.push({
                         label: 'Wait (Skip Turn)',
                         enabled: true,
                         action: () => this.waitUnit(context.unit)
                     });
                 }
-                
+
                 items.push({
                     label: 'Center on Unit',
                     enabled: true,
                     action: () => this.renderEngine.centerOnHex(context.unit.x, context.unit.y)
                 });
-                
+
                 items.push({
                     label: 'Unit Details',
                     enabled: true,
                     action: () => this.showUnitDetails(context.unit)
                 });
-                
+
                 // Hero-specific actions
                 if (context.unit.type === 'HERO') {
                     items.push({
@@ -589,7 +589,7 @@ export class InputEngine {
                         enabled: true,
                         action: () => this.showHeroStats(context.unit)
                     });
-                    
+
                     if (context.unit.items && context.unit.items.length > 0) {
                         items.push({
                             label: 'Manage Items',
@@ -604,7 +604,7 @@ export class InputEngine {
                     enabled: this.selectedUnit && this.selectedUnit.owner === currentPlayer && !this.selectedUnit.hasActed,
                     action: () => this.handleUnitAction(this.selectedUnit, context.hexCoords.x, context.hexCoords.y)
                 });
-                
+
                 items.push({
                     label: 'Enemy Unit Info',
                     enabled: true,
@@ -612,7 +612,7 @@ export class InputEngine {
                 });
             }
         }
-        
+
         // City actions
         if (context.city) {
             if (context.city.owner === currentPlayer) {
@@ -621,13 +621,13 @@ export class InputEngine {
                     enabled: true,
                     action: () => this.selectCity(context.city)
                 });
-                
+
                 items.push({
                     label: 'Produce Units',
                     enabled: true,
                     action: () => this.showCityProduction(context.city)
                 });
-                
+
                 items.push({
                     label: 'City Management',
                     enabled: true,
@@ -646,19 +646,19 @@ export class InputEngine {
                     action: () => this.handleUnitAction(this.selectedUnit, context.hexCoords.x, context.hexCoords.y)
                 });
             }
-            
+
             items.push({
                 label: 'City Details',
                 enabled: true,
                 action: () => this.showCityDetails(context.city)
             });
         }
-        
+
         // Movement actions (if unit is selected)
         if (this.selectedUnit && this.selectedUnit.owner === currentPlayer && !this.selectedUnit.hasActed) {
             const movementRange = this.gameState.getUnitMovementRange(this.selectedUnit);
             const canMoveTo = movementRange.some(hex => hex.x === context.hexCoords.x && hex.y === context.hexCoords.y);
-            
+
             if (canMoveTo && !context.unit && !context.city) {
                 items.push({
                     label: 'Move Here',
@@ -667,7 +667,7 @@ export class InputEngine {
                 });
             }
         }
-        
+
         // General actions
         items.push({
             label: 'Center Camera',
@@ -677,39 +677,39 @@ export class InputEngine {
                 this.gameManager.render();
             }
         });
-        
+
         items.push({
             label: 'Terrain Info',
             enabled: true,
             action: () => this.showTerrainDetails(context.hex)
         });
-        
+
         // Game actions
         if (items.length > 0) {
-            items.push({ label: '---', enabled: false, action: () => {} }); // Separator
+            items.push({ label: '---', enabled: false, action: () => { } }); // Separator
         }
-        
+
         items.push({
             label: 'End Turn',
             enabled: this.gameManager.getGamePhase() === 'PLAYING',
             action: () => this.endTurn()
         });
-        
+
         items.push({
             label: 'Save Game',
             enabled: true,
             action: () => this.gameManager.showSaveDialog()
         });
-        
+
         items.push({
             label: 'Load Game',
             enabled: true,
             action: () => this.gameManager.showLoadDialog()
         });
-        
+
         return items;
     }
-    
+
     /**
      * Hide context menu
      */
@@ -720,7 +720,7 @@ export class InputEngine {
             this.contextMenuVisible = false;
         }
     }
-    
+
     /**
      * Display terrain information (Requirement 2.4)
      * @param {Hex} hex - Hex to display info for
@@ -730,7 +730,7 @@ export class InputEngine {
     displayTerrainInfo(hex, x, y) {
         // Check if we're in a browser environment
         if (typeof document === 'undefined') return;
-        
+
         // Create or update terrain info display
         let terrainInfo = document.getElementById('terrain-info');
         if (!terrainInfo) {
@@ -749,24 +749,24 @@ export class InputEngine {
             `;
             document.body.appendChild(terrainInfo);
         }
-        
+
         // Update content
         const movementCost = hex.getMovementCost();
         const defenseBonus = hex.getDefenseBonus ? hex.getDefenseBonus() : 0;
-        
+
         terrainInfo.innerHTML = `
             <div><strong>${hex.terrain}</strong></div>
             <div>Movement Cost: ${movementCost}</div>
             <div>Defense Bonus: +${defenseBonus}</div>
             <div>Position: (${hex.x}, ${hex.y})</div>
         `;
-        
+
         // Position near mouse cursor
         terrainInfo.style.left = `${x + 10}px`;
         terrainInfo.style.top = `${y - 10}px`;
         terrainInfo.style.display = 'block';
     }
-    
+
     /**
      * Clear terrain information display
      */
@@ -776,27 +776,58 @@ export class InputEngine {
             terrainInfo.style.display = 'none';
         }
     }
-    
+
     /**
      * Display unit information in UI (Requirement 9.2)
      * @param {Unit} unit - Unit to display info for
      */
     displayUnitInfo(unit) {
-        const unitDetails = document.getElementById('unit-details');
-        if (unitDetails) {
-            unitDetails.innerHTML = `
-                <div><strong>${unit.type}</strong></div>
-                <div>Owner: ${this.gameState.getPlayer(unit.owner).name}</div>
-                <div>Health: ${unit.health}/${unit.getMaxHealth()}</div>
-                <div>Attack: ${unit.attack}</div>
-                <div>Defense: ${unit.defense}</div>
-                <div>Movement: ${unit.movement}</div>
-                <div>Position: (${unit.x}, ${unit.y})</div>
-                <div>Has Acted: ${unit.hasActed ? 'Yes' : 'No'}</div>
-            `;
+        try {
+            const unitDetails = document.getElementById('unit-details');
+            if (unitDetails) {
+                const owner = this.gameState.getPlayer(unit.owner);
+                const ownerName = owner ? owner.name : 'Unknown';
+
+                unitDetails.innerHTML = `
+                    <div><strong>${unit.type}</strong></div>
+                    <div>Owner: ${ownerName}</div>
+                    <div>Health: ${unit.health}/${unit.getMaxHealth()}</div>
+                    <div>Attack: ${unit.attack}</div>
+                    <div>Defense: ${unit.defense}</div>
+                    <div>Movement: ${unit.movement}</div>
+                    <div>Position: (${unit.x}, ${unit.y})</div>
+                    <div>Has Acted: ${unit.hasActed ? 'Yes' : 'No'}</div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error displaying unit info:', error);
         }
     }
-    
+
+    /**
+     * Display city information in UI
+     * @param {City} city - City to display info for
+     */
+    displayCityInfo(city) {
+        try {
+            const cityDetails = document.getElementById('city-details');
+            if (cityDetails) {
+                const owner = city.owner !== null ? this.gameState.getPlayer(city.owner) : null;
+                const ownerName = owner ? owner.name : 'Neutral';
+
+                cityDetails.innerHTML = `
+                    <div><strong>${city.name}</strong></div>
+                    <div>Owner: ${ownerName}</div>
+                    <div>Size: ${city.size}</div>
+                    <div>Production: ${city.production ? city.production.type : 'None'}</div>
+                    <div>Position: (${city.x}, ${city.y})</div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error displaying city info:', error);
+        }
+    }
+
     /**
      * Clear unit information display
      */
@@ -806,24 +837,13 @@ export class InputEngine {
             unitDetails.innerHTML = '<div>No unit selected</div>';
         }
     }
-    
+
     /**
      * Display city information in UI (Requirement 9.2)
      * @param {City} city - City to display info for
      */
-    displayCityInfo(city) {
-        const cityDetails = document.getElementById('city-details');
-        if (cityDetails) {
-            cityDetails.innerHTML = `
-                <div><strong>${city.name}</strong></div>
-                <div>Owner: ${this.gameState.getPlayer(city.owner).name}</div>
-                <div>Size: ${city.size}</div>
-                <div>Position: (${city.x}, ${city.y})</div>
-                <div>Production: ${city.production.length > 0 ? city.production[0] : 'None'}</div>
-            `;
-        }
-    }
-    
+
+
     /**
      * Clear city information display
      */
@@ -833,39 +853,39 @@ export class InputEngine {
             cityDetails.innerHTML = '<div>No city selected</div>';
         }
     }
-    
+
     // Keyboard shortcut actions
-    
+
     moveCameraUp() {
         this.renderEngine.moveCameraBy(0, -50);
         this.gameManager.render();
     }
-    
+
     moveCameraDown() {
         this.renderEngine.moveCameraBy(0, 50);
         this.gameManager.render();
     }
-    
+
     moveCameraLeft() {
         this.renderEngine.moveCameraBy(-50, 0);
         this.gameManager.render();
     }
-    
+
     moveCameraRight() {
         this.renderEngine.moveCameraBy(50, 0);
         this.gameManager.render();
     }
-    
+
     zoomIn() {
         this.renderEngine.zoomIn(1.2);
         this.gameManager.render();
     }
-    
+
     zoomOut() {
         this.renderEngine.zoomOut(1.2);
         this.gameManager.render();
     }
-    
+
     fitMapToScreen() {
         const map = this.gameState ? this.gameState.getMap() : null;
         if (map) {
@@ -873,133 +893,133 @@ export class InputEngine {
             this.gameManager.render();
         }
     }
-    
+
     resetCamera() {
         this.renderEngine.resetCamera();
         this.gameManager.render();
     }
-    
+
     endTurn() {
         if (this.gameManager.getGamePhase() === 'PLAYING') {
             this.gameManager.endTurn();
         }
     }
-    
+
     centerOnSelectedUnit() {
         if (this.selectedUnit) {
             this.renderEngine.centerOnHex(this.selectedUnit.x, this.selectedUnit.y);
             this.gameManager.render();
         }
     }
-    
+
     selectNextUnit() {
         if (!this.gameState) return;
-        
+
         const playerUnits = this.gameState.getPlayerUnits(this.gameManager.getCurrentPlayer());
         if (playerUnits.length === 0) return;
-        
+
         let currentIndex = -1;
         if (this.selectedUnit) {
             currentIndex = playerUnits.findIndex(unit => unit.id === this.selectedUnit.id);
         }
-        
+
         const nextIndex = (currentIndex + 1) % playerUnits.length;
         this.selectUnit(playerUnits[nextIndex]);
         this.gameManager.render();
     }
-    
+
     selectPreviousUnit() {
         if (!this.gameState) return;
-        
+
         const playerUnits = this.gameState.getPlayerUnits(this.gameManager.getCurrentPlayer());
         if (playerUnits.length === 0) return;
-        
+
         let currentIndex = -1;
         if (this.selectedUnit) {
             currentIndex = playerUnits.findIndex(unit => unit.id === this.selectedUnit.id);
         }
-        
+
         const prevIndex = currentIndex <= 0 ? playerUnits.length - 1 : currentIndex - 1;
         this.selectUnit(playerUnits[prevIndex]);
         this.gameManager.render();
     }
-    
+
     selectUnitType(unitType) {
         if (!this.gameState) return;
-        
+
         const playerUnits = this.gameState.getPlayerUnits(this.gameManager.getCurrentPlayer());
         const unitsOfType = playerUnits.filter(unit => unit.type === unitType);
-        
+
         if (unitsOfType.length === 0) return;
-        
+
         // If we have a selected unit of this type, select the next one
         let currentIndex = -1;
         if (this.selectedUnit && this.selectedUnit.type === unitType) {
             currentIndex = unitsOfType.findIndex(unit => unit.id === this.selectedUnit.id);
         }
-        
+
         const nextIndex = (currentIndex + 1) % unitsOfType.length;
         this.selectUnit(unitsOfType[nextIndex]);
         this.gameManager.render();
     }
-    
+
     toggleHelp() {
         // TODO: Implement help overlay
         console.log('Toggle help - showing keyboard shortcuts');
         this.showKeyboardShortcuts();
     }
-    
+
     toggleUnitInfo() {
         const unitInfo = document.getElementById('unit-info');
         if (unitInfo) {
             unitInfo.style.display = unitInfo.style.display === 'none' ? 'block' : 'none';
         }
     }
-    
+
     toggleMinimap() {
         // TODO: Implement minimap toggle
         console.log('Toggle minimap');
     }
-    
+
     deleteSelectedUnit() {
         if (this.selectedUnit && this.selectedUnit.owner === this.gameManager.getCurrentPlayer()) {
             // TODO: Implement unit deletion if allowed by game rules
             console.log('Delete unit requested for:', this.selectedUnit);
         }
     }
-    
+
     confirmAction() {
         // TODO: Implement action confirmation
         console.log('Action confirmed');
     }
-    
+
     quickSave() {
         this.gameManager.quickSave();
     }
-    
+
     quickLoad() {
         this.gameManager.quickLoad();
     }
-    
+
     // Detail display methods
-    
+
     showUnitDetails(unit) {
         // TODO: Show detailed unit information in a modal or expanded panel
         console.log('Show unit details:', unit);
         this.displayUnitInfo(unit);
     }
-    
+
     showHeroStats(hero) {
         // TODO: Show detailed hero statistics and progression
         console.log('Show hero stats:', hero);
         this.displayUnitInfo(hero);
     }
-    
+
     showItemManagement(hero) {
         // TODO: Show item management interface for hero
         console.log('Show item management for:', hero);
     }
-    
+
     waitUnit(unit) {
         // Mark unit as having acted (skip turn)
         if (unit && unit.owner === this.gameManager.getCurrentPlayer()) {
@@ -1009,17 +1029,17 @@ export class InputEngine {
             console.log('Unit waiting (turn skipped):', unit);
         }
     }
-    
+
     showCityManagement(city) {
         // TODO: Show comprehensive city management interface
         console.log('Show city management for:', city);
         this.displayCityInfo(city);
     }
-    
+
     showKeyboardShortcuts() {
         // Create help overlay showing keyboard shortcuts
         this.hideKeyboardShortcuts(); // Remove existing if any
-        
+
         const helpOverlay = document.createElement('div');
         helpOverlay.id = 'keyboard-shortcuts-help';
         helpOverlay.style.cssText = `
@@ -1038,7 +1058,7 @@ export class InputEngine {
             font-family: monospace;
             font-size: 14px;
         `;
-        
+
         helpOverlay.innerHTML = `
             <h3 style="margin-top: 0; text-align: center;">Keyboard Shortcuts</h3>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
@@ -1079,15 +1099,15 @@ export class InputEngine {
                 <button id="close-help-btn" style="padding: 8px 16px; background: #333; color: white; border: 1px solid #666; border-radius: 4px; cursor: pointer;">Close (H or Escape)</button>
             </div>
         `;
-        
+
         document.body.appendChild(helpOverlay);
-        
+
         // Add close button functionality
         const closeBtn = document.getElementById('close-help-btn');
         if (closeBtn) {
             closeBtn.addEventListener('click', () => this.hideKeyboardShortcuts());
         }
-        
+
         // Close on escape or H key
         const closeHandler = (e) => {
             if (e.key === 'Escape' || e.key === 'h' || e.key === 'H') {
@@ -1097,44 +1117,44 @@ export class InputEngine {
         };
         document.addEventListener('keydown', closeHandler);
     }
-    
+
     hideKeyboardShortcuts() {
         const helpOverlay = document.getElementById('keyboard-shortcuts-help');
         if (helpOverlay) {
             helpOverlay.remove();
         }
     }
-    
+
     showCityDetails(city) {
         // TODO: Show detailed city information in a modal or expanded panel
         console.log('Show city details:', city);
         this.displayCityInfo(city);
     }
-    
+
     showCityProduction(city) {
         // TODO: Show city production interface
         console.log('Show city production for:', city);
     }
-    
+
     showTerrainDetails(hex) {
         // TODO: Show detailed terrain information
         console.log('Show terrain details:', hex);
     }
-    
+
     // Getters
-    
+
     getSelectedUnit() {
         return this.selectedUnit;
     }
-    
+
     getHoveredHex() {
         return this.hoveredHex;
     }
-    
+
     isContextMenuVisible() {
         return this.contextMenuVisible;
     }
-    
+
     /**
      * Update references when game state changes
      * @param {GameState} gameState - New game state
@@ -1142,7 +1162,7 @@ export class InputEngine {
     updateGameState(gameState) {
         this.gameState = gameState;
     }
-    
+
     /**
      * Clean up event listeners
      */
@@ -1155,15 +1175,15 @@ export class InputEngine {
             canvas.removeEventListener('wheel', this.handleMouseWheel);
             canvas.removeEventListener('contextmenu', (e) => e.preventDefault());
         }
-        
+
         document.removeEventListener('keydown', this.handleKeyDown);
         document.removeEventListener('keyup', this.handleKeyUp);
         document.removeEventListener('click', this.handleDocumentClick);
         window.removeEventListener('resize', this.handleWindowResize);
-        
+
         this.hideContextMenu();
         this.clearTerrainInfo();
-        
+
         console.log('InputEngine destroyed');
     }
 }
