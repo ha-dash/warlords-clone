@@ -60,6 +60,15 @@ This is the foundation implementation. The next tasks will add:
 - AI system
 - And more...
 
+## UI Components
+
+The project uses Shadcn UI components adapted for vanilla JavaScript. See [docs/shadcn-usage.md](docs/shadcn-usage.md) for usage instructions.
+
+- **Theme**: Maia style with Cyan theme
+- **Font**: Public Sans
+- **Radius**: Large
+- Components: Button, Card, Dialog, Input, Badge, Alert
+
 ## Development
 
 The game is built using modern JavaScript (ES6+) with a modular architecture. Each system is designed to be independent and testable.

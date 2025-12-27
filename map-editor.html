@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Редактор карт - Warlords Clone</title>
+    <link rel="stylesheet" href="styles/shadcn-theme.css">
+    <link rel="stylesheet" href="styles/shadcn-components.css">
+    <link rel="stylesheet" href="map-editor.css">
+</head>
+<body>
+    <div id="map-editor-container">
+        <header id="editor-header">
+            <h1>🗺️ Редактор карт</h1>
+            <div id="header-actions">
+                <button id="new-map-btn" class="btn btn-outline">Новая карта</button>
+                <button id="load-map-btn" class="btn btn-outline">Загрузить</button>
+                <button id="save-map-btn" class="btn btn-default">Сохранить</button>
+                <button id="back-btn" class="btn btn-ghost">← Назад к игре</button>
+            </div>
+        </header>
+        
+        <div id="editor-main">
+            <div id="editor-canvas-container">
+                <div id="loading-overlay" class="loading-overlay">
+            <div style="text-align: center;">
+                <div id="loading-text">Загрузка моделей и текстур...</div>
+                <div id="loading-progress"></div>
+            </div>
+        </div>
+                <canvas id="editor-canvas"></canvas>
+            </div>
+            
+            <aside id="editor-sidebar">
+                <div class="editor-panel">
+                    <h3>Размер карты</h3>
+                    <div class="tool-group">
+                        <label>Ширина:</label>
+                        <input type="number" id="map-width" value="20" min="5" max="100">
+                    </div>
+                    <div class="tool-group">
+                        <label>Высота:</label>
+                        <input type="number" id="map-height" value="15" min="5" max="100">
+                    </div>
+                    <button id="apply-size-btn" class="btn btn-default">Применить размер</button>
+                </div>
+
+                <div class="editor-panel">
+                    <h3>Инструменты</h3>
+                    <div class="tool-group">
+                        <label>Режим редактирования:</label>
+                        <select id="edit-mode" class="input">
+                            <option value="terrain">Местность</option>
+                            <option value="building">Здания</option>
+                            <option value="decoration">Декорации</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="editor-panel card" id="terrain-panel">
+                    <h3 class="card-title">Тип местности</h3>
+                    <div class="terrain-buttons" id="terrain-buttons">
+                        <button class="btn btn-outline terrain-btn" data-terrain="PLAINS">Равнина</button>
+                        <button class="btn btn-outline terrain-btn" data-terrain="FOREST">Лес</button>
+                        <button class="btn btn-outline terrain-btn" data-terrain="MOUNTAIN">Горы</button>
+                        <button class="btn btn-outline terrain-btn" data-terrain="WATER">Вода</button>
+                        <button class="btn btn-outline terrain-btn" data-terrain="ROAD">Дорога</button>
+                    </div>
+                    <div class="info-text">
+                        Выберите тип местности и кликните на гекс для изменения
+                    </div>
+                </div>
+
+                <div class="editor-panel" id="building-panel" style="display: none;">
+                    <h3>Здания</h3>
+                    <div class="building-list" id="building-list">
+                        <!-- Buildings will be loaded dynamically -->
+                    </div>
+                    <div class="info-text">
+                        Выберите здание и кликните на гекс для размещения
+                    </div>
+                </div>
+
+                <div class="editor-panel">
+                    <h3>Информация о гексе</h3>
+                    <div id="hex-info" class="info-text">
+                        Наведите курсор на гекс для просмотра информации
+                    </div>
+                </div>
+
+                <div class="editor-panel">
+                    <h3>Управление камерой</h3>
+                    <button id="reset-camera-btn" class="btn btn-outline">Сбросить камеру</button>
+                    <button id="center-map-btn" class="btn btn-outline">Центрировать карту</button>
+                    <div class="info-text" style="margin-top: 0.75rem;">
+                        <strong>Управление:</strong><br>
+                        Перетаскивание: перемещение камеры<br>
+                        Колесо мыши: масштабирование<br>
+                        ПКМ: вращение камеры
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <div id="status-bar">
+            <span id="status-text">Готов к работе</span>
+            <span id="coordinates">Координаты: (0, 0)</span>
+        </div>
+    </div>
+    
+    <script type="module" src="js/editor/MapEditor.js"></script>
+</body>
+</html>
+

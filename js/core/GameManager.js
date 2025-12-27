@@ -5,6 +5,7 @@
 
 import { GameState } from './GameState.js';
 import { RenderEngine } from './RenderEngine.js';
+import { RenderEngine3D } from './RenderEngine3D.js';
 import { InputEngine } from './InputEngine.js';
 import { AIEngine } from './AIEngine.js';
 import { SpellGenerator } from './SpellGenerator.js';
@@ -46,8 +47,15 @@ export class GameManager {
             this.gameState = new GameState();
             this.gameState.initialize(config);
 
-            // Initialize render engine
-            this.renderEngine = new RenderEngine(this.canvasId);
+            // Initialize render engine (use 3D by default, can be switched via use3DRendering config)
+            const use3D = config.gameSettings?.use3DRendering !== false; // Default to 3D, set to false to use 2D
+            if (use3D) {
+                console.log('Initializing 3D render engine with Three.js');
+                this.renderEngine = new RenderEngine3D(this.canvasId);
+            } else {
+                console.log('Initializing 2D render engine with Canvas');
+                this.renderEngine = new RenderEngine(this.canvasId);
+            }
 
             // Initialize input engine
             this.inputEngine = new InputEngine(this);
