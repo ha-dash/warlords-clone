@@ -162,6 +162,7 @@ export default function MapEditor() {
   const selectionMeshRef = useRef<THREE.Mesh | null>(null)
   const animationFrameRef = useRef<number | null>(null)
   const draggedModelRef = useRef<{ obj: string; mtl: string; name: string } | null>(null)
+  const tileHeightRef = useRef<number>(1.0) // Will be updated from first loaded model
 
   const [isLoading, setIsLoading] = useState(true)
   const [loadingText, setLoadingText] = useState('Инициализация редактора...')
@@ -242,44 +243,49 @@ export default function MapEditor() {
     return [worldX, worldZ]
   }
 
-  const createHexagonalGrid = (width: number, height: number): THREE.LineSegments => {
-    const scale = 3.5
-    const r = 1.0
-    const R = 2 / Math.sqrt(3)
+  const getHexPoints = (cX: number, cZ: number, radius: number, y: number): THREE.Vector3[] => {
     const points: THREE.Vector3[] = []
+    for (let i = 0; i < 6; i++) {
+      const angle = (i * 60) * (Math.PI / 180)
+      const px = cX + radius * Math.cos(angle)
+      const pz = cZ + radius * Math.sin(angle)
+      points.push(new THREE.Vector3(px, y, pz))
+    }
+    return points
+  }
+
+  const createHexagonalGrid = (width: number, height: number): THREE.Group => {
+    const scale = 3.5
+    const R = 2 / Math.sqrt(3)
+    const group = new THREE.Group()
+    group.name = '__hexGrid'
 
     for (let x = 0; x < width; x++) {
       for (let y = 0; y < height; y++) {
         const [cX, cZ] = hexToWorld(x, y, width, height)
-        const hexPoints: THREE.Vector3[] = []
+        const hexPoints = getHexPoints(cX, cZ, R * scale, 0)
+        const points: THREE.Vector3[] = []
 
         for (let i = 0; i < 6; i++) {
-          const angle = (i * 60) * (Math.PI / 180)
-          const px = cX + R * scale * Math.cos(angle)
-          const pz = cZ + R * scale * Math.sin(angle)
-          // Grid exactly at Z=0 (Three.js Y=0)
-          hexPoints.push(new THREE.Vector3(px, 0, pz))
+          points.push(hexPoints[i], hexPoints[(i + 1) % 6])
         }
 
-        for (let i = 0; i < 6; i++) {
-          points.push(hexPoints[i])
-          points.push(hexPoints[(i + 1) % 6])
-        }
+        const geometry = new THREE.BufferGeometry().setFromPoints(points)
+        const material = new THREE.LineBasicMaterial({
+          color: 0x444444,
+          transparent: true,
+          opacity: 0.5,
+          polygonOffset: true,
+          polygonOffsetFactor: 1,
+          polygonOffsetUnits: 1
+        })
+        const segments = new THREE.LineSegments(geometry, material)
+        segments.name = `grid_${x}_${y}`
+        segments.renderOrder = -1
+        group.add(segments)
       }
     }
-
-    const geometry = new THREE.BufferGeometry().setFromPoints(points)
-    const material = new THREE.LineBasicMaterial({
-      color: 0x444444,
-      transparent: true,
-      opacity: 0.5,
-      polygonOffset: true,
-      polygonOffsetFactor: 1, // Push it slightly "back"
-      polygonOffsetUnits: 1
-    })
-    const segments = new THREE.LineSegments(geometry, material)
-    segments.renderOrder = -1 // Render before other objects
-    return segments
+    return group
   }
 
   const _worldToHex = (worldX: number, worldZ: number): { x: number; y: number } | null => {
@@ -316,8 +322,11 @@ export default function MapEditor() {
   const createHexMesh = async (hex: Hex): Promise<THREE.Group | null> => {
     const [worldX, worldZ] = hexToWorld(hex.x, hex.y, mapRef.current?.width, mapRef.current?.height)
     try {
-      const model = selectedModel || availableModels[0]
-      if (model && availableModels.length > 0) {
+      const model = hex.modelData || selectedModel || availableModels[0]
+      if (model) {
+        // If hex didn't have modelData, save it now to ensure persistence
+        if (!hex.modelData) hex.modelData = model
+
         const key = `terrain_${hex.terrain}_${model.name}_${hex.x}_${hex.y}`
 
         // Try to get from cache synchronously first
@@ -330,16 +339,25 @@ export default function MapEditor() {
 
         if (loadedModel) {
           const clone = loadedModel.clone()
-          clone.position.set(worldX, 0, worldZ)
-          // Base rotation for flat topped + custom rotation from hex state
+
+          // Measure tile height if not already known
+          const box = new THREE.Box3().setFromObject(clone)
+          const height = box.max.y - box.min.y
+          if (tileHeightRef.current === 1.0 && height > 0) {
+            tileHeightRef.current = height * 3.5 // Since we scale later
+          }
+
+          // Important: we scale the group AFTER we adjust individual positions to keep Z=0 consistent
           clone.rotation.y = Math.PI / 2 + (hex.rotation || 0)
           clone.scale.set(3.5, 3.5, 3.5)
 
-          // Ensure bottom is at Z=0 (Three.js Y=0)
-          const box = new THREE.Box3().setFromObject(clone)
-          const minY = box.min.y
-          // Adjust position so that box.min.y is 0
-          clone.position.y -= minY
+          // Adjust children so they're relative to the bottom at 0
+          const realBox = new THREE.Box3().setFromObject(clone)
+          const actualHeight = realBox.max.y - realBox.min.y
+          tileHeightRef.current = actualHeight // Calibrate with real scale
+
+          const minY = realBox.min.y
+          clone.position.set(worldX, (hex.height || 0) * actualHeight - minY, worldZ)
 
           clone.traverse((child) => {
             if (child instanceof THREE.Mesh) {
@@ -347,6 +365,14 @@ export default function MapEditor() {
               child.receiveShadow = true
             }
           })
+
+          // Update individual grid height
+          const grid = sceneRef.current?.getObjectByName('__hexGrid')?.getObjectByName(`grid_${hex.x}_${hex.y}`)
+          if (grid) {
+            grid.position.y = (hex.height || 0) * actualHeight + 0.001
+            grid.visible = true // Grid is always visible under tiles
+          }
+
           return clone
         }
       }
@@ -377,7 +403,9 @@ export default function MapEditor() {
 
     for (let y = 0; y < mapHeight; y++) {
       for (let x = 0; x < mapWidth; x++) {
-        map.setHex(x, y, new Hex(x, y, terrain))
+        const h = new Hex(x, y, terrain)
+        h.modelData = selectedModel
+        map.setHex(x, y, h)
       }
     }
 
@@ -413,6 +441,24 @@ export default function MapEditor() {
       })
 
     await Promise.all(promises)
+
+    // Set grid for empty spaces
+    if (sceneRef.current) {
+      const gridGroup = sceneRef.current.getObjectByName('__hexGrid') as THREE.Group
+      if (gridGroup) {
+        mapRef.current.hexes.forEach((hex, i) => {
+          if (!hex) {
+            const x = i % mapRef.current!.width
+            const y = Math.floor(i / mapRef.current!.width)
+            const grid = gridGroup.getObjectByName(`grid_${x}_${y}`)
+            if (grid) {
+              grid.position.y = 0
+              grid.visible = true
+            }
+          }
+        })
+      }
+    }
   }
 
   const updateHexMesh = async (x: number, y: number) => {
@@ -428,33 +474,37 @@ export default function MapEditor() {
     }
 
     if (hex) {
-      // Попытка синхронного получения меша для мгновенного отображения
-      const model = selectedModel || availableModels[0]
-      const key = `terrain_${hex.terrain}_${model.name}_${hex.x}_${hex.y}`
-      const cached = modelLoader.getCachedModel(key)
+      // Use hex's own modelData for rotation/height updates instead of the side panel selection
+      const model = hex.modelData || selectedModel || availableModels[0]
 
-      if (cached) {
-        const [wX, wZ] = hexToWorld(x, y)
-        const clone = cached.clone()
-        clone.position.set(wX, 0, wZ)
-        clone.rotation.y = Math.PI / 2 + (hex.rotation || 0)
-        clone.scale.set(3.5, 3.5, 3.5)
+      if (model) {
+        if (!hex.modelData) hex.modelData = model
+        const key = `terrain_${hex.terrain}_${model.name}_${hex.x}_${hex.y}`
+        const cached = modelLoader.getCachedModel(key)
 
-        // Ensure bottom is at Z=0 (Three.js Y=0) if not already
-        const box = new THREE.Box3().setFromObject(clone)
-        const minY = box.min.y
-        if (Math.abs(minY) > 0.001) {
-          clone.position.y -= minY
-        }
+        if (cached) {
+          const [wX, wZ] = hexToWorld(x, y)
+          const clone = cached.clone()
+          clone.position.set(wX, 0, wZ)
+          clone.rotation.y = Math.PI / 2 + (hex.rotation || 0)
+          clone.scale.set(3.5, 3.5, 3.5)
 
-        sceneRef.current.add(clone)
-        hexMeshesRef.current.set(hexKey, clone as any)
-      } else {
-        // Если нет в кэше, загружаем асинхронно
-        const mesh = await createHexMesh(hex)
-        if (mesh && sceneRef.current) {
-          sceneRef.current.add(mesh)
-          hexMeshesRef.current.set(hexKey, mesh as any)
+          // Ensure bottom is at Z=0 (Three.js Y=0) if not already
+          const box = new THREE.Box3().setFromObject(clone)
+          const minY = box.min.y
+          if (Math.abs(minY) > 0.001) {
+            clone.position.y -= minY
+          }
+
+          sceneRef.current.add(clone)
+          hexMeshesRef.current.set(hexKey, clone as any)
+        } else {
+          // Если нет в кэше, загружаем асинхронно
+          const mesh = await createHexMesh(hex)
+          if (mesh && sceneRef.current) {
+            sceneRef.current.add(mesh)
+            hexMeshesRef.current.set(hexKey, mesh as any)
+          }
         }
       }
     }
@@ -466,17 +516,14 @@ export default function MapEditor() {
     const obj = hexMeshesRef.current.get(hexKey)
     if (obj) {
       sceneRef.current.remove(obj)
-      obj.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose()
-          if (Array.isArray(child.material)) {
-            child.material.forEach((m) => m.dispose())
-          } else {
-            child.material.dispose()
-          }
-        }
-      })
       hexMeshesRef.current.delete(hexKey)
+
+      // Reset grid height for this empty spot
+      const grid = sceneRef.current.getObjectByName('__hexGrid')?.getObjectByName(`grid_${x}_${y}`)
+      if (grid) {
+        grid.position.y = 0
+        grid.visible = true
+      }
     }
     mapRef.current.removeHex(x, y)
     const building = buildingObjectsRef.current.get(hexKey)
@@ -524,6 +571,52 @@ export default function MapEditor() {
       const hexGrid = createHexagonalGrid(mapWidth, mapHeight)
       hexGrid.name = '__hexGrid'
       scene.add(hexGrid)
+
+      // Initialize Selection Highlight here to ensure it exists in the scene
+      const scale = 3.5
+      const R = 2 / Math.sqrt(3)
+      const outerR = R * scale * 1.05
+      const innerR = R * scale * 0.95
+
+      const selectionShape = new THREE.Shape()
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * 60) * (Math.PI / 180)
+        const x = outerR * Math.cos(angle)
+        const y = outerR * Math.sin(angle)
+        if (i === 0) selectionShape.moveTo(x, y)
+        else selectionShape.lineTo(x, y)
+      }
+      selectionShape.closePath()
+
+      const selectionHole = new THREE.Path()
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * 60) * (Math.PI / 180)
+        const x = innerR * Math.cos(angle)
+        const y = innerR * Math.sin(angle)
+        if (i === 0) selectionHole.moveTo(x, y)
+        else selectionHole.lineTo(x, y)
+      }
+      selectionHole.closePath()
+      selectionShape.holes.push(selectionHole)
+
+      const selectionGeom = new THREE.ShapeGeometry(selectionShape)
+      selectionGeom.rotateX(-Math.PI / 2)
+      selectionGeom.rotateY(Math.PI / 2)
+
+      const selectionMat = new THREE.MeshBasicMaterial({
+        color: 0x00ffff, // Bright Cyan (Primary)
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+        depthTest: false,
+        depthWrite: false
+      })
+      const sMesh = new THREE.Mesh(selectionGeom, selectionMat)
+      sMesh.name = '__selectionHighlight'
+      sMesh.renderOrder = 2000
+      sMesh.visible = false
+      scene.add(sMesh)
+      selectionMeshRef.current = sMesh
 
       const aspect = (window.innerWidth - 400) / (window.innerHeight - 150)
       const camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 10000)
@@ -596,6 +689,14 @@ export default function MapEditor() {
             hex.rotation = (hex.rotation || 0) + Math.PI / 3
             updateHexMesh(selectedHex.x, selectedHex.y)
           }
+          if (e.code === 'KeyR') {
+            hex.height = Math.min(4, (hex.height || 0) + 1)
+            updateHexMesh(selectedHex.x, selectedHex.y)
+          }
+          if (e.code === 'KeyF') {
+            hex.height = Math.max(0, (hex.height || 0) - 1)
+            updateHexMesh(selectedHex.x, selectedHex.y)
+          }
         }
       }
 
@@ -612,26 +713,37 @@ export default function MapEditor() {
     }
   }, [selectedHex])
 
-  // Selection Highlight
+  // Selection Highlight Update Effect
   useEffect(() => {
-    if (!sceneRef.current) return
-
-    if (!selectionMeshRef.current) {
-      const geom = new THREE.RingGeometry(3.6, 3.8, 6)
-      geom.rotateX(-Math.PI / 2)
-      geom.rotateY(Math.PI / 2) // Orient for flat topped
-      const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide, transparent: true, opacity: 0.8 })
-      const mesh = new THREE.Mesh(geom, mat)
-      mesh.name = '__selectionHighlight'
-      sceneRef.current.add(mesh)
-      selectionMeshRef.current = mesh
-    }
+    if (!selectionMeshRef.current || !mapRef.current) return
 
     if (selectedHex) {
+      const hex = mapRef.current.getHex(selectedHex.x, selectedHex.y)
       const [wX, wZ] = hexToWorld(selectedHex.x, selectedHex.y)
-      // Highlight at Z=0.01 (Three.js Y=0.01) to be slightly above the tile bottom surface
-      selectionMeshRef.current.position.set(wX, 0.01, wZ)
+
+      let hValue = 0
+      const hexKey = `${selectedHex.x},${selectedHex.y}`
+      const meshObj = hexMeshesRef.current.get(hexKey)
+
+      if (meshObj) {
+        meshObj.updateMatrixWorld(true)
+        const box = new THREE.Box3().setFromObject(meshObj)
+        if (!box.isEmpty()) {
+          hValue = box.max.y
+        } else {
+          hValue = (hex?.height || 0) * 0.7 + 0.7 // fallback
+        }
+      } else {
+        const h = hex ? (hex.height || 0) : 0
+        hValue = h * 0.7 + 0.7 // fallback based on approximate model height
+      }
+
+      selectionMeshRef.current.position.set(wX, hValue + 0.1, wZ)
+      // Mirror the tile's rotation: constant offset PI/2 + hex state rotation
+      selectionMeshRef.current.rotation.y = Math.PI / 2 + (hex?.rotation || 0)
       selectionMeshRef.current.visible = true
+      // Force update
+      selectionMeshRef.current.updateMatrixWorld()
     } else {
       selectionMeshRef.current.visible = false
     }
@@ -691,8 +803,18 @@ export default function MapEditor() {
       const coords = _worldToHex(pt.x, pt.z)
       if (coords) {
         const { x, y } = coords
-        setSelectedHex({ x, y })
+        if (mapRef.current.hasHex(x, y)) {
+          setSelectedHex({ x, y })
+        } else {
+          // Deselect if clicking on empty spot of the grid
+          setSelectedHex(null)
+        }
+      } else {
+        setSelectedHex(null)
       }
+    } else {
+      // Didn't even hit the plane
+      setSelectedHex(null)
     }
   }
 
@@ -854,7 +976,10 @@ export default function MapEditor() {
                   let t = selectedTerrain
                   if (selectedFolder === 'roads') t = TERRAIN_TYPES.ROAD
                   else if (selectedFolder === 'coast') t = TERRAIN_TYPES.WATER
-                  mapRef.current.setTerrain(x, y, t)
+
+                  const h = new Hex(x, y, t)
+                  h.modelData = draggedModelRef.current
+                  mapRef.current.setHex(x, y, h)
                   await updateHexMesh(x, y)
                 } else {
                   await placeBuilding(x, y, draggedModelRef.current)

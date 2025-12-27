@@ -59,6 +59,8 @@ export class Hex {
   city: unknown = null
   hasRiver: boolean = false
   rotation: number = 0 // In radians
+  height: number = 0 // Level 0-4 (total 5 levels)
+  modelData?: { obj: string; mtl: string; name: string }
 
   constructor(x: number, y: number, terrain: TerrainType = TERRAIN_TYPES.PLAINS) {
     this.x = x
