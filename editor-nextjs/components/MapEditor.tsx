@@ -32,8 +32,11 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Hex, TERRAIN_CONFIG, TERRAIN_TYPES, type TerrainType } from '@/lib/game/Hex'
 import { Map as GameMap } from '@/lib/game/Map'
+import { MapSerializer, type BuildingData } from '@/lib/game/MapSerializer'
 import { modelLoader } from '@/lib/three/ModelLoader'
 import { cn } from '@/lib/utils'
 
@@ -197,6 +200,9 @@ export default function MapEditor() {
   const [assetCategories, setAssetCategories] = useState<AssetCategory[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [selectedFolder, setSelectedFolder] = useState<string>('')
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [saveMapName, setSaveMapName] = useState('')
+  const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   useEffect(() => {
     const fetchAssets = async () => {
@@ -438,6 +444,146 @@ export default function MapEditor() {
     setSelectedHex(null)
   }
 
+  const showNotification = (type: 'success' | 'error', message: string) => {
+    setNotification({ type, message })
+    setTimeout(() => setNotification(null), 3000)
+  }
+
+  const handleSaveMap = () => {
+    if (!mapRef.current) {
+      showNotification('error', 'Нет карты для сохранения')
+      return
+    }
+
+    // Open dialog to get map name
+    setSaveMapName(`Map ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`)
+    setSaveDialogOpen(true)
+  }
+
+  const confirmSaveMap = () => {
+    if (!mapRef.current) return
+
+    try {
+      setSaveDialogOpen(false)
+      setLoadingText('Сохранение карты...')
+      setIsLoading(true)
+
+      // Collect building data
+      const buildingData = new Map<string, { obj: string; mtl: string; name: string }>()
+      buildingObjectsRef.current.forEach((building, key) => {
+        const modelData = (building as any).userData?.modelData
+        if (modelData) {
+          buildingData.set(key, modelData)
+        }
+      })
+
+      const jsonString = MapSerializer.serialize(mapRef.current, mapSize, {
+        name: saveMapName || `Map ${new Date().toLocaleString()}`,
+        includeBuildings: buildingData.size > 0,
+        buildingData: buildingData.size > 0 ? buildingData : undefined,
+      })
+
+      // Validate before saving
+      const validation = MapSerializer.validate(JSON.parse(jsonString))
+      if (!validation.valid) {
+        throw new Error(`Ошибка валидации: ${validation.errors.join(', ')}`)
+      }
+
+      // Create download link
+      const blob = new Blob([jsonString], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const sanitizedName = saveMapName.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+      a.download = `${sanitizedName || 'warlords-map'}-${Date.now()}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      setIsLoading(false)
+      showNotification('success', 'Карта успешно сохранена')
+      console.log('Map saved successfully')
+    } catch (error) {
+      console.error('Failed to save map:', error)
+      setIsLoading(false)
+      showNotification('error', `Ошибка сохранения: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  const handleLoadMap = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (!file) return
+
+      try {
+        setLoadingText('Загрузка карты...')
+        setIsLoading(true)
+
+        const text = await file.text()
+        
+        // Validate file before deserializing
+        let parsedData: unknown
+        try {
+          parsedData = JSON.parse(text)
+        } catch (parseError) {
+          throw new Error('Файл не является валидным JSON')
+        }
+
+        const validation = MapSerializer.validate(parsedData)
+        if (!validation.valid) {
+          throw new Error(`Неверный формат файла: ${validation.errors.join(', ')}`)
+        }
+
+        const { map, mapSize: loadedMapSize, buildings, metadata } = MapSerializer.deserialize(text)
+
+        // Update map size if different
+        if (loadedMapSize !== mapSize) {
+          setMapSize(loadedMapSize)
+        }
+
+        // Clear existing map
+        hexMeshesRef.current.forEach((mesh) => {
+          sceneRef.current?.remove(mesh)
+        })
+        hexMeshesRef.current.clear()
+
+        buildingObjectsRef.current.forEach((building) => {
+          sceneRef.current?.remove(building)
+        })
+        buildingObjectsRef.current.clear()
+
+        // Set new map
+        mapRef.current = map
+
+        // Rebuild map visualization
+        await buildMap()
+
+        // Load buildings if present
+        if (buildings && buildings.length > 0) {
+          setLoadingText(`Загрузка зданий (${buildings.length})...`)
+          for (const building of buildings) {
+            await placeBuilding(building.x, building.y, building.modelData)
+          }
+        }
+
+        setSelectedHex(null)
+        setIsLoading(false)
+        const mapName = metadata?.name || file.name
+        showNotification('success', `Карта "${mapName}" успешно загружена`)
+        console.log('Map loaded successfully')
+      } catch (error) {
+        console.error('Failed to load map:', error)
+        setIsLoading(false)
+        showNotification('error', `Ошибка загрузки: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    input.click()
+  }
+
   const buildMap = async () => {
     if (!sceneRef.current || !mapRef.current) return
     setLoadingText('Построение карты...')
@@ -623,6 +769,16 @@ export default function MapEditor() {
       loadedModel.position.set(worldX, 0, worldZ)
       loadedModel.rotation.y = Math.PI / 2
       loadedModel.scale.set(3.5, 3.5, 3.5)
+      
+      // Store model metadata for serialization
+      ;(loadedModel as any).userData = {
+        modelData: {
+          obj: building.obj,
+          mtl: building.mtl,
+          name: building.name,
+        },
+      }
+      
       sceneRef.current.add(loadedModel)
       buildingObjectsRef.current.set(hexKey, loadedModel)
     } catch (error) {
@@ -1149,10 +1305,75 @@ export default function MapEditor() {
         </ScrollArea>
         <div className="p-4 border-t border-border flex flex-col gap-2">
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" className="flex-1 font-bold">Open</Button>
-            <Button className="flex-1 font-bold shadow-lg shadow-primary/20">Save</Button>
+            <Button 
+              variant="outline" 
+              className="flex-1 font-bold"
+              onClick={handleLoadMap}
+            >
+              <FolderOpen size={16} className="mr-2" />
+              Open
+            </Button>
+            <Button 
+              className="flex-1 font-bold shadow-lg shadow-primary/20"
+              onClick={handleSaveMap}
+            >
+              <FloppyDisk size={16} className="mr-2" />
+              Save
+            </Button>
           </div>
         </div>
+
+        {/* Save Dialog */}
+        <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Сохранить карту</DialogTitle>
+              <DialogDescription>
+                Введите название для вашей карты
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <Input
+                value={saveMapName}
+                onChange={(e) => setSaveMapName(e.target.value)}
+                placeholder="Название карты"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    confirmSaveMap()
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSaveDialogOpen(false)}>
+                Отмена
+              </Button>
+              <Button onClick={confirmSaveMap}>
+                Сохранить
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Notification Toast */}
+        {notification && (
+          <div className={cn(
+            "fixed bottom-6 right-6 z-50 p-4 rounded-lg shadow-2xl border backdrop-blur-xl animate-in slide-in-from-bottom-4",
+            notification.type === 'success' 
+              ? "bg-green-500/90 border-green-400/50 text-white" 
+              : "bg-red-500/90 border-red-400/50 text-white"
+          )}>
+            <div className="flex items-center gap-2">
+              {notification.type === 'success' ? (
+                <FloppyDisk size={20} weight="fill" />
+              ) : (
+                <Trash size={20} weight="fill" />
+              )}
+              <span className="font-bold text-sm">{notification.message}</span>
+            </div>
+          </div>
+        )}
       </aside>
 
       <main className="flex-1 relative flex flex-col overflow-hidden bg-[#050505]" ref={containerRef}>
