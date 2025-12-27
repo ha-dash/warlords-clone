@@ -10,15 +10,14 @@ import {
   CaretDown,
   ArrowsInLineHorizontal,
   ArrowsInLineVertical,
-  Info,
   Cube,
   SelectionPlus,
   Compass,
-  List
+  List,
+  Keyboard
 } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -39,6 +38,15 @@ import { modelLoader } from '@/lib/three/ModelLoader'
 import { cn } from '@/lib/utils'
 
 type EditMode = 'terrain' | 'building'
+
+type MapSize = 'small' | 'medium' | 'large' | 'very-large'
+
+const MAP_SIZES: Record<MapSize, { label: string; width: number; height: number }> = {
+  'small': { label: 'Small', width: 25, height: 25 },
+  'medium': { label: 'Medium', width: 50, height: 50 },
+  'large': { label: 'Large', width: 75, height: 75 },
+  'very-large': { label: 'Very large', width: 100, height: 100 },
+}
 
 interface AssetModel {
   name: string
@@ -146,7 +154,7 @@ function ModelPreview({ obj, mtl }: { obj: string; mtl: string }) {
   }, [obj, mtl])
 
   return (
-    <div className="relative w-full aspect-square bg-muted/20 rounded-lg overflow-hidden flex items-center justify-center">
+    <div className="relative w-full h-full bg-muted/20 rounded-lg overflow-hidden flex items-center justify-center">
       {!hasImage && <div className="absolute inset-0 flex items-center justify-center"><Cube className="animate-spin text-muted-foreground/30" size={24} /></div>}
       <canvas ref={canvasRef} width={120} height={120} className={cn("w-full h-full pointer-events-none transition-opacity duration-300", hasImage ? "opacity-100" : "opacity-0")} />
     </div>
@@ -169,17 +177,17 @@ export default function MapEditor() {
 
   const [isLoading, setIsLoading] = useState(true)
   const [loadingText, setLoadingText] = useState('Initializing...')
-  const [mapWidth, setMapWidth] = useState(10)
-  const [mapHeight, setMapHeight] = useState(5)
+  const [mapSize, setMapSize] = useState<MapSize>('small')
   const [selectedTerrain, setSelectedTerrain] = useState<TerrainType>(TERRAIN_TYPES.PLAINS)
   const [editMode, setEditMode] = useState<EditMode>('terrain')
   const [selectedHex, setSelectedHex] = useState<{ x: number; y: number } | null>(null)
   const [currentHeightLevel, setCurrentHeightLevel] = useState(0) // Global height level 0-4
   const [selectedModel, setSelectedModel] = useState<{ obj: string; mtl: string; name: string } | null>(null)
 
-  const isDraggingRef = useRef(false) // Left click + modifier (legacy)
+  const isDraggingTileRef = useRef(false) // Left click drag tile
   const isRotatingRef = useRef(false) // Right click rotate
   const isPanningRef = useRef(false)   // Middle click pan
+  const dragStartHexRef = useRef<{ x: number; y: number } | null>(null)
   const lastMouseRef = useRef({ x: 0, y: 0 })
   const cameraDistanceRef = useRef(150)
   const cameraAngleXRef = useRef(Math.PI / 4)
@@ -407,7 +415,8 @@ export default function MapEditor() {
     }
 
     setLoadingText('Заполнение карты...')
-    const map = new GameMap(mapWidth, mapHeight)
+    const mapDimensions = MAP_SIZES[mapSize]
+    const map = new GameMap(mapDimensions.width, mapDimensions.height)
 
     // Determine terrain type based on current selection
     let terrain: TerrainType = TERRAIN_TYPES.PLAINS
@@ -416,8 +425,8 @@ export default function MapEditor() {
     else if (selectedFolder === 'forest') terrain = TERRAIN_TYPES.FOREST
     else if (selectedFolder === 'mountains') terrain = TERRAIN_TYPES.MOUNTAIN
 
-    for (let y = 0; y < mapHeight; y++) {
-      for (let x = 0; x < mapWidth; x++) {
+    for (let y = 0; y < mapDimensions.height; y++) {
+      for (let x = 0; x < mapDimensions.width; x++) {
         const h = new Hex(x, y, terrain)
         h.modelData = selectedModel
         map.setHex(x, y, h)
@@ -564,6 +573,44 @@ export default function MapEditor() {
     }
   }
 
+  const moveHex = async (fromX: number, fromY: number, toX: number, toY: number) => {
+    if (!mapRef.current || !sceneRef.current) return false
+
+    // Get topmost hex at source position
+    const sourceHexStack = mapRef.current.getHexStack(fromX, fromY)
+    if (sourceHexStack.length === 0) return false
+
+    const hexToMove = sourceHexStack[sourceHexStack.length - 1]
+    const hexHeight = hexToMove.height
+
+    // Check if target position is valid and free at the same height
+    if (!mapRef.current.isValidCoordinate(toX, toY)) return false
+    if (mapRef.current.hasHex(toX, toY, hexHeight)) return false
+
+    // Clone hex and update coordinates
+    const newHex = new Hex(toX, toY, hexToMove.terrain)
+    newHex.height = hexHeight
+    newHex.rotation = hexToMove.rotation
+    newHex.modelData = hexToMove.modelData
+
+    // Remove hex from source
+    await removeHex(fromX, fromY)
+
+    // Add hex to target
+    mapRef.current.setHex(toX, toY, newHex)
+    await updateHexMesh(toX, toY, hexHeight)
+
+    // Wait for mesh to be updated in hexMeshesRef before updating selection
+    // Use requestAnimationFrame to ensure mesh is rendered before updating highlight
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setSelectedHex({ x: toX, y: toY })
+      })
+    })
+
+    return true
+  }
+
   const placeBuilding = async (x: number, y: number, building: AssetModel) => {
     if (!sceneRef.current) return
     const hexKey = `${x},${y}`
@@ -599,8 +646,9 @@ export default function MapEditor() {
       scene.add(hitPlane)
 
       // Add hexagonal grids for all levels (initially only current level visible)
+      const gridMapDimensions = MAP_SIZES[mapSize]
       for (let level = 0; level <= 4; level++) {
-        const hexGrid = createHexagonalGrid(mapWidth, mapHeight, level)
+        const hexGrid = createHexagonalGrid(gridMapDimensions.width, gridMapDimensions.height, level)
         hexGrid.visible = (level === currentHeightLevel)
         scene.add(hexGrid)
       }
@@ -665,7 +713,8 @@ export default function MapEditor() {
       renderer.shadowMap.enabled = true
       rendererRef.current = renderer
       setupLighting(scene)
-      const map = new GameMap(mapWidth, mapHeight)
+      const initMapDimensions = MAP_SIZES[mapSize]
+      const map = new GameMap(initMapDimensions.width, initMapDimensions.height)
       mapRef.current = map
       await buildMap()
       animate()
@@ -704,16 +753,64 @@ export default function MapEditor() {
       // Don't trigger if typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
-      // WASD Panning
-      const moveSpeed = 5
-      const yaw = cameraAngleYRef.current
-      const forward = new THREE.Vector3(-Math.cos(yaw), 0, -Math.sin(yaw))
-      const right = new THREE.Vector3(-Math.sin(yaw), 0, Math.cos(yaw))
+      // WASD: Move selected hex if selected, otherwise pan camera
+      if (selectedHex && mapRef.current) {
+        const neighbors = mapRef.current.getNeighborCoordinates(selectedHex.x, selectedHex.y)
+        const hexStack = mapRef.current.getHexStack(selectedHex.x, selectedHex.y)
+        if (hexStack.length > 0) {
+          const hexHeight = hexStack[hexStack.length - 1].height
+          let targetCoords: { x: number; y: number } | null = null
 
-      if (e.code === 'KeyW') cameraTargetRef.current.add(forward.multiplyScalar(moveSpeed))
-      if (e.code === 'KeyS') cameraTargetRef.current.add(forward.multiplyScalar(-moveSpeed))
-      if (e.code === 'KeyA') cameraTargetRef.current.add(right.multiplyScalar(-moveSpeed))
-      if (e.code === 'KeyD') cameraTargetRef.current.add(right.multiplyScalar(moveSpeed))
+          // Map WASD to neighbor directions based on hexagonal grid
+          // For odd-r offset coordinates, directions vary by row
+          if (selectedHex.y % 2 === 0) {
+            // Even rows
+            if (e.code === 'KeyW') {
+              // North West
+              targetCoords = neighbors.find(n => n.x === selectedHex.x && n.y === selectedHex.y - 1) || neighbors.find(n => n.y < selectedHex.y) || null
+            } else if (e.code === 'KeyS') {
+              // South West
+              targetCoords = neighbors.find(n => n.x === selectedHex.x && n.y === selectedHex.y + 1) || neighbors.find(n => n.y > selectedHex.y) || null
+            } else if (e.code === 'KeyA') {
+              // West
+              targetCoords = neighbors.find(n => n.x === selectedHex.x - 1 && n.y === selectedHex.y) || neighbors.find(n => n.x < selectedHex.x) || null
+            } else if (e.code === 'KeyD') {
+              // East
+              targetCoords = neighbors.find(n => n.x === selectedHex.x + 1 && n.y === selectedHex.y) || neighbors.find(n => n.x > selectedHex.x) || null
+            }
+          } else {
+            // Odd rows
+            if (e.code === 'KeyW') {
+              // North East
+              targetCoords = neighbors.find(n => n.x === selectedHex.x && n.y === selectedHex.y - 1) || neighbors.find(n => n.y < selectedHex.y) || null
+            } else if (e.code === 'KeyS') {
+              // South East
+              targetCoords = neighbors.find(n => n.x === selectedHex.x && n.y === selectedHex.y + 1) || neighbors.find(n => n.y > selectedHex.y) || null
+            } else if (e.code === 'KeyA') {
+              // West
+              targetCoords = neighbors.find(n => n.x === selectedHex.x - 1 && n.y === selectedHex.y) || neighbors.find(n => n.x < selectedHex.x) || null
+            } else if (e.code === 'KeyD') {
+              // East
+              targetCoords = neighbors.find(n => n.x === selectedHex.x + 1 && n.y === selectedHex.y) || neighbors.find(n => n.x > selectedHex.x) || null
+            }
+          }
+
+          if (targetCoords && !mapRef.current.hasHex(targetCoords.x, targetCoords.y, hexHeight)) {
+            await moveHex(selectedHex.x, selectedHex.y, targetCoords.x, targetCoords.y)
+          }
+        }
+      } else {
+        // No selection: pan camera with WASD
+        const moveSpeed = 5
+        const yaw = cameraAngleYRef.current
+        const forward = new THREE.Vector3(-Math.cos(yaw), 0, -Math.sin(yaw))
+        const right = new THREE.Vector3(-Math.sin(yaw), 0, Math.cos(yaw))
+
+        if (e.code === 'KeyW') cameraTargetRef.current.add(forward.multiplyScalar(moveSpeed))
+        if (e.code === 'KeyS') cameraTargetRef.current.add(forward.multiplyScalar(-moveSpeed))
+        if (e.code === 'KeyA') cameraTargetRef.current.add(right.multiplyScalar(-moveSpeed))
+        if (e.code === 'KeyD') cameraTargetRef.current.add(right.multiplyScalar(moveSpeed))
+      }
 
       // Q/E Rotating, R/F Height change for selected hex
       if (selectedHex && mapRef.current) {
@@ -725,11 +822,11 @@ export default function MapEditor() {
           const oldHeight = hex.height
 
           if (e.code === 'KeyQ') {
-            hex.rotation = (hex.rotation || 0) - Math.PI / 3
+            hex.rotation = (hex.rotation || 0) + Math.PI / 3  // Против часовой (увеличиваем угол)
             updateHexMesh(selectedHex.x, selectedHex.y, hex.height)
           }
           if (e.code === 'KeyE') {
-            hex.rotation = (hex.rotation || 0) + Math.PI / 3
+            hex.rotation = (hex.rotation || 0) - Math.PI / 3  // По часовой (уменьшаем угол)
             updateHexMesh(selectedHex.x, selectedHex.y, hex.height)
           }
           if (e.code === 'KeyR') {
@@ -748,6 +845,13 @@ export default function MapEditor() {
               hex.height = newHeight
               mapRef.current.setHex(selectedHex.x, selectedHex.y, hex)
               await updateHexMesh(selectedHex.x, selectedHex.y, newHeight)
+              
+              // Force selection highlight update after mesh is created
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  setSelectedHex({ ...selectedHex })
+                })
+              })
             }
           }
           if (e.code === 'KeyF') {
@@ -766,6 +870,13 @@ export default function MapEditor() {
               hex.height = newHeight
               mapRef.current.setHex(selectedHex.x, selectedHex.y, hex)
               await updateHexMesh(selectedHex.x, selectedHex.y, newHeight)
+              
+              // Force selection highlight update after mesh is created
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  setSelectedHex({ ...selectedHex })
+                })
+              })
             }
           }
         }
@@ -798,38 +909,53 @@ export default function MapEditor() {
 
       const [wX, wZ] = hexToWorld(selectedHex.x, selectedHex.y)
 
-      let hValue = 0
-      const hexKey = `${selectedHex.x},${selectedHex.y}`
       const hexStack = mapRef.current.getHexStack(selectedHex.x, selectedHex.y)
       const topmostHex = hexStack.length > 0 ? hexStack[hexStack.length - 1] : hex
-      const meshKey = topmostHex ? `${selectedHex.x},${selectedHex.y}_${topmostHex.height}` : hexKey
-      const meshObj = hexMeshesRef.current.get(meshKey)
+      const meshKey = topmostHex ? `${selectedHex.x},${selectedHex.y}_${topmostHex.height}` : `${selectedHex.x},${selectedHex.y}`
+      
+      // Wait for mesh to be available if it's not yet created
+      const updateHighlight = () => {
+        const meshObj = hexMeshesRef.current.get(meshKey)
+        let hValue = 0
 
-      if (meshObj) {
-        meshObj.updateMatrixWorld(true)
-        const box = new THREE.Box3().setFromObject(meshObj)
-        if (!box.isEmpty()) {
-          hValue = box.max.y
+        if (meshObj) {
+          // Force matrix update to get correct world position
+          meshObj.updateMatrixWorld(true)
+          const box = new THREE.Box3().setFromObject(meshObj)
+          if (!box.isEmpty()) {
+            hValue = box.max.y
+          } else {
+            // Fallback: calculate from hex data
+            const LEVEL_HEIGHT = tileHeightRef.current || 0.7
+            const minY = meshObj.position.y
+            hValue = (topmostHex?.height || 0) * LEVEL_HEIGHT - minY + (LEVEL_HEIGHT / 2)
+          }
         } else {
+          // If mesh not found yet, calculate height from hex data
           const LEVEL_HEIGHT = tileHeightRef.current || 0.7
-          hValue = (topmostHex?.height || 0) * LEVEL_HEIGHT + (LEVEL_HEIGHT / 2)
+          const h = topmostHex ? (topmostHex.height || 0) : 0
+          hValue = h * LEVEL_HEIGHT + (LEVEL_HEIGHT / 2)
         }
-      } else {
-        const LEVEL_HEIGHT = tileHeightRef.current || 0.7
-        const h = topmostHex ? (topmostHex.height || 0) : 0
-        hValue = h * LEVEL_HEIGHT + (LEVEL_HEIGHT / 2)
+
+        if (selectionMeshRef.current) {
+          selectionMeshRef.current.position.set(wX, hValue + 0.1, wZ)
+          // Mirror the tile's rotation: constant offset PI/2 + hex state rotation
+          selectionMeshRef.current.rotation.y = Math.PI / 2 + (topmostHex?.rotation || 0)
+          selectionMeshRef.current.visible = true
+          // Force update
+          selectionMeshRef.current.updateMatrixWorld(true)
+        }
       }
 
-      selectionMeshRef.current.position.set(wX, hValue + 0.1, wZ)
-      // Mirror the tile's rotation: constant offset PI/2 + hex state rotation
-      selectionMeshRef.current.rotation.y = Math.PI / 2 + (topmostHex?.rotation || 0)
-      selectionMeshRef.current.visible = true
-      // Force update
-      selectionMeshRef.current.updateMatrixWorld()
+      // Always use double requestAnimationFrame to ensure mesh is fully updated
+      // This is critical for vertical movement where mesh position changes
+      requestAnimationFrame(() => {
+        requestAnimationFrame(updateHighlight)
+      })
     } else {
       selectionMeshRef.current.visible = false
     }
-  }, [selectedHex, mapRef.current?.hexes])
+  }, [selectedHex])
 
   useEffect(() => {
     const handleResize = () => {
@@ -845,8 +971,8 @@ export default function MapEditor() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!cameraRef.current || !mapRef.current || !canvasRef.current) return
+  const getHexAtMousePosition = (event: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } | null => {
+    if (!cameraRef.current || !mapRef.current || !canvasRef.current) return null
     const rect = canvasRef.current.getBoundingClientRect()
     const mouse = new THREE.Vector2(
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -859,7 +985,6 @@ export default function MapEditor() {
     const intersects = raycaster.intersectObjects(Array.from(hexMeshesRef.current.values()), true)
     if (intersects.length > 0) {
       let hitMesh: THREE.Object3D | null = intersects[0].object
-      // Traverse up to find the entry in hexMeshesRef (since models are Groups)
       let hexKey: string | null = null
       while (hitMesh && !hexKey) {
         const found = Array.from(hexMeshesRef.current.entries()).find(([_, m]) => m === hitMesh)
@@ -868,12 +993,9 @@ export default function MapEditor() {
       }
 
       if (hexKey) {
-        // Parse key format: "x,y_height"
         const parts = hexKey.split('_')
         const [x, y] = parts[0].split(',').map(Number)
-        // Always select the topmost hex (no height in selectedHex)
-        setSelectedHex({ x, y })
-        return
+        return { x, y }
       }
     }
 
@@ -885,18 +1007,46 @@ export default function MapEditor() {
       const pt = planeIntersects[0].point
       const coords = _worldToHex(pt.x, pt.z)
       if (coords) {
-        const { x, y } = coords
-        if (mapRef.current.hasHex(x, y)) {
-          setSelectedHex({ x, y })
-        } else {
-          // Deselect if clicking on empty spot of the grid
-          setSelectedHex(null)
+        return coords
+      }
+    }
+
+    return null
+  }
+
+  const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!mapRef.current) return
+
+    // Handle tile drag & drop
+    if (isDraggingTileRef.current && dragStartHexRef.current) {
+      const targetCoords = getHexAtMousePosition(event)
+      if (targetCoords) {
+        const hexStack = mapRef.current.getHexStack(dragStartHexRef.current.x, dragStartHexRef.current.y)
+        if (hexStack.length > 0) {
+          const hexHeight = hexStack[hexStack.length - 1].height
+          // Check if target is different and free at the same height
+          if (
+            (targetCoords.x !== dragStartHexRef.current.x || targetCoords.y !== dragStartHexRef.current.y) &&
+            !mapRef.current.hasHex(targetCoords.x, targetCoords.y, hexHeight)
+          ) {
+            moveHex(dragStartHexRef.current.x, dragStartHexRef.current.y, targetCoords.x, targetCoords.y)
+          }
         }
+      }
+      isDraggingTileRef.current = false
+      dragStartHexRef.current = null
+      return
+    }
+
+    // Normal click: select hex
+    const coords = getHexAtMousePosition(event)
+    if (coords) {
+      if (mapRef.current.hasHex(coords.x, coords.y)) {
+        setSelectedHex(coords)
       } else {
         setSelectedHex(null)
       }
     } else {
-      // Didn't even hit the plane
       setSelectedHex(null)
     }
   }
@@ -915,15 +1065,13 @@ export default function MapEditor() {
       const panFactor = cameraDistanceRef.current * 0.001
       cameraTargetRef.current.add(right.multiplyScalar(dx * panFactor))
       cameraTargetRef.current.add(forward.multiplyScalar(dy * panFactor))
-    } else if (isDraggingRef.current) {
-      cameraAngleYRef.current += dx * 0.01
-      cameraAngleXRef.current = Math.max(0.1, Math.min(Math.PI / 2, cameraAngleXRef.current + dy * 0.01))
     }
+    // Tile dragging is handled in handleCanvasClick (onMouseUp)
     lastMouseRef.current = { x: event.clientX, y: event.clientY }
   }
 
   const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
-    cameraDistanceRef.current = Math.max(50, Math.min(500, cameraDistanceRef.current + event.deltaY * 0.1))
+    cameraDistanceRef.current = Math.max(20, Math.min(500, cameraDistanceRef.current + event.deltaY * 0.1))
   }
 
   return (
@@ -945,10 +1093,18 @@ export default function MapEditor() {
           <div className="p-4 flex flex-col h-full gap-6 min-h-0">
             <section className="space-y-4">
               <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Map Config</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <Input type="number" value={mapWidth} onChange={(e) => setMapWidth(parseInt(e.target.value) || 10)} />
-                <Input type="number" value={mapHeight} onChange={(e) => setMapHeight(parseInt(e.target.value) || 5)} />
-              </div>
+              <Select value={mapSize} onValueChange={(value) => setMapSize(value as MapSize)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(MAP_SIZES).map(([key, { label, width, height }]) => (
+                    <SelectItem key={key} value={key}>
+                      {label} {width}×{height}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button
                 className="w-full"
                 onClick={handleInitializeMap}
@@ -1018,19 +1174,21 @@ export default function MapEditor() {
         {/* TOP LEFT: GRID INFO */}
         <div className="absolute top-4 left-4 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-3 px-4 py-2 shadow-2xl">
           <MapTrifold size={18} className="text-primary" weight="bold" />
-          <span className="text-xs font-bold tracking-tight uppercase">GRID: {mapWidth}×{mapHeight}</span>
+          <span className="text-xs font-bold tracking-tight uppercase">GRID: {MAP_SIZES[mapSize].width}×{MAP_SIZES[mapSize].height}</span>
         </div>
 
         {/* TOP RIGHT: CURRENT SELECTION FROM PREVIEW */}
         {selectedModel && (
-          <div className="absolute top-4 right-4 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-3 pl-4 pr-2 py-1.5 shadow-2xl">
+          <div className="absolute top-4 right-4 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-3 pl-4 pr-2 py-1.5 shadow-2xl overflow-visible">
             <Cube size={18} className="text-primary" weight="bold" />
             <div className="flex flex-col leading-none">
               <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold leading-tight">Placing</span>
               <span className="text-xs font-bold tracking-tight uppercase">{selectedModel.name}</span>
             </div>
-            <div className="w-8 h-8 rounded-full border border-primary/20 bg-muted/20 overflow-hidden ml-1">
-              <ModelPreview obj={selectedModel.obj} mtl={selectedModel.mtl} />
+            <div className="w-8 h-8 overflow-visible ml-1 flex items-center justify-center">
+              <div style={{ transform: 'scale(2)' }}>
+                <ModelPreview obj={selectedModel.obj} mtl={selectedModel.mtl} />
+              </div>
             </div>
           </div>
         )}
@@ -1085,23 +1243,66 @@ export default function MapEditor() {
         )}
 
         {/* BOTTOM RIGHT: CONTROLS */}
-        <div className="absolute bottom-6 right-6 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-4 px-6 py-3 shadow-2xl pointer-events-auto">
-          <span className="text-[11px] font-bold text-primary tracking-widest uppercase flex items-center gap-2">
-            <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary">WASD</span> Pan
-          </span>
-          <Separator orientation="vertical" className="h-4 bg-border/50" />
-          <span className="text-[11px] font-bold text-primary tracking-widest uppercase flex items-center gap-2">
-            <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary">Q / E</span> Rotate
-          </span>
-          <Separator orientation="vertical" className="h-4 bg-border/50" />
-          <span className="text-[11px] font-bold text-primary tracking-widest uppercase flex items-center gap-2">
-            <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary">R / F</span> Height
-          </span>
-          <Separator orientation="vertical" className="h-4 bg-border/50" />
-          <span className="text-[11px] font-bold text-destructive tracking-widest uppercase flex items-center gap-2">
-            <span className="bg-destructive/20 px-2 py-0.5 rounded border border-destructive/30 text-destructive">DEL</span> Clear
-          </span>
-        </div>
+        <Popover>
+          <PopoverTrigger asChild>
+            <div className="absolute bottom-6 right-6 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-3 pl-4 pr-2 py-1.5 shadow-2xl pointer-events-auto cursor-pointer hover:bg-card/90 transition-colors">
+              <Keyboard size={18} className="text-primary" weight="bold" />
+              <span className="text-xs font-bold tracking-tight uppercase text-primary">Controls</span>
+            </div>
+          </PopoverTrigger>
+          <PopoverContent 
+            side="top" 
+            align="end"
+            className="w-80 bg-card/95 backdrop-blur-xl border border-border/50 shadow-2xl"
+          >
+            <div className="space-y-3">
+              <h4 className="font-bold text-sm uppercase tracking-wider text-primary mb-3">Keyboard Shortcuts</h4>
+              
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between py-1.5 border-b border-border/30">
+                  <span className="text-muted-foreground">Move tile</span>
+                  <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary font-mono font-bold">WASD</span>
+                </div>
+                
+                <div className="flex items-center justify-between py-1.5 border-b border-border/30">
+                  <span className="text-muted-foreground">Rotate tile</span>
+                  <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary font-mono font-bold">Q / E</span>
+                </div>
+                
+                <div className="flex items-center justify-between py-1.5 border-b border-border/30">
+                  <span className="text-muted-foreground">Change height</span>
+                  <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary font-mono font-bold">R / F</span>
+                </div>
+                
+                <div className="flex items-center justify-between py-1.5 border-b border-border/30">
+                  <span className="text-muted-foreground">Delete tile</span>
+                  <span className="bg-destructive/20 px-2 py-0.5 rounded border border-destructive/30 text-destructive font-mono font-bold">DEL</span>
+                </div>
+              </div>
+
+              <Separator className="my-3" />
+
+              <h4 className="font-bold text-sm uppercase tracking-wider text-primary mb-3">Mouse Controls</h4>
+              
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between py-1.5 border-b border-border/30">
+                  <span className="text-muted-foreground">Select / Drag tile</span>
+                  <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary font-bold">LMB</span>
+                </div>
+                
+                <div className="flex items-center justify-between py-1.5 border-b border-border/30">
+                  <span className="text-muted-foreground">Pan camera</span>
+                  <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary font-bold">MMB</span>
+                </div>
+                
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="text-muted-foreground">Rotate camera</span>
+                  <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary font-bold">RMB</span>
+                </div>
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
 
         <div className="flex-1 relative">
           {isLoading && <div className="absolute inset-0 bg-background/90 z-50 flex items-center justify-center font-bold uppercase tracking-widest">{loadingText}</div>}
@@ -1201,20 +1402,35 @@ export default function MapEditor() {
             onMouseMove={handleMouseMove}
             onMouseDown={(e) => {
               if (e.button === 0) {
-                if (e.altKey || e.shiftKey) isDraggingRef.current = true
+                // Left click: start tile drag if clicking on selected hex
+                if (selectedHex) {
+                  const coords = getHexAtMousePosition(e)
+                  if (coords && coords.x === selectedHex.x && coords.y === selectedHex.y) {
+                    isDraggingTileRef.current = true
+                    dragStartHexRef.current = { x: selectedHex.x, y: selectedHex.y }
+                  }
+                }
               } else if (e.button === 2) {
+                // Right click: rotate camera
                 isRotatingRef.current = true
               } else if (e.button === 1) {
+                // Middle click: pan camera
                 isPanningRef.current = true
               }
             }}
-            onMouseUp={() => {
-              isDraggingRef.current = false
+            onMouseUp={(e) => {
+              if (e.button === 0) {
+                // Handle tile drag end in handleCanvasClick
+              } else {
+                isDraggingTileRef.current = false
+                dragStartHexRef.current = null
+              }
               isRotatingRef.current = false
               isPanningRef.current = false
             }}
             onMouseLeave={() => {
-              isDraggingRef.current = false
+              isDraggingTileRef.current = false
+              dragStartHexRef.current = null
               isRotatingRef.current = false
               isPanningRef.current = false
             }}
