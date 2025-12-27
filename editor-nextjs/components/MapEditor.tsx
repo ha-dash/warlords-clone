@@ -6,6 +6,8 @@ import {
   FolderOpen,
   Trash,
   CaretLeft,
+  CaretUp,
+  CaretDown,
   ArrowsInLineHorizontal,
   ArrowsInLineVertical,
   Info,
@@ -156,6 +158,7 @@ export default function MapEditor() {
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<GameMap | null>(null)
   const hexMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
   const buildingObjectsRef = useRef<Map<string, THREE.Group>>(new Map())
@@ -165,12 +168,13 @@ export default function MapEditor() {
   const tileHeightRef = useRef<number>(1.0) // Will be updated from first loaded model
 
   const [isLoading, setIsLoading] = useState(true)
-  const [loadingText, setLoadingText] = useState('Инициализация редактора...')
+  const [loadingText, setLoadingText] = useState('Initializing...')
   const [mapWidth, setMapWidth] = useState(10)
   const [mapHeight, setMapHeight] = useState(5)
   const [selectedTerrain, setSelectedTerrain] = useState<TerrainType>(TERRAIN_TYPES.PLAINS)
   const [editMode, setEditMode] = useState<EditMode>('terrain')
   const [selectedHex, setSelectedHex] = useState<{ x: number; y: number } | null>(null)
+  const [currentHeightLevel, setCurrentHeightLevel] = useState(0) // Global height level 0-4
   const [selectedModel, setSelectedModel] = useState<{ obj: string; mtl: string; name: string } | null>(null)
 
   const isDraggingRef = useRef(false) // Left click + modifier (legacy)
@@ -243,44 +247,38 @@ export default function MapEditor() {
     return [worldX, worldZ]
   }
 
-  const getHexPoints = (cX: number, cZ: number, radius: number, y: number): THREE.Vector3[] => {
-    const points: THREE.Vector3[] = []
-    for (let i = 0; i < 6; i++) {
-      const angle = (i * 60) * (Math.PI / 180)
-      const px = cX + radius * Math.cos(angle)
-      const pz = cZ + radius * Math.sin(angle)
-      points.push(new THREE.Vector3(px, y, pz))
+  const createHexagonalGrid = (width: number, height: number, level: number): THREE.Group => {
+    const getHexPoints = (cx: number, cy: number, radius: number, rotation: number): THREE.Vector3[] => {
+      const points: THREE.Vector3[] = []
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * 60 + rotation) * (Math.PI / 180)
+        const x = cx + radius * Math.cos(angle)
+        const y = cy + radius * Math.sin(angle)
+        points.push(new THREE.Vector3(x, 0, y))
+      }
+      return points
     }
-    return points
-  }
 
-  const createHexagonalGrid = (width: number, height: number): THREE.Group => {
-    const scale = 3.5
-    const R = 2 / Math.sqrt(3)
     const group = new THREE.Group()
-    group.name = '__hexGrid'
+    group.name = `__hexGrid_level_${level}`
+    const R = 2 / Math.sqrt(3)
+    const scale = 3.5
+    const LEVEL_HEIGHT = tileHeightRef.current || 0.7
+    const gridY = level * LEVEL_HEIGHT + 0.001
 
-    for (let x = 0; x < width; x++) {
-      for (let y = 0; y < height; y++) {
-        const [cX, cZ] = hexToWorld(x, y, width, height)
-        const hexPoints = getHexPoints(cX, cZ, R * scale, 0)
-        const points: THREE.Vector3[] = []
-
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const [worldX, worldZ] = hexToWorld(x, y, width, height)
+        const points = getHexPoints(worldX, worldZ, R * scale, 0)
+        const linePoints: THREE.Vector3[] = []
         for (let i = 0; i < 6; i++) {
-          points.push(hexPoints[i], hexPoints[(i + 1) % 6])
+          linePoints.push(points[i], points[(i + 1) % 6])
         }
-
-        const geometry = new THREE.BufferGeometry().setFromPoints(points)
-        const material = new THREE.LineBasicMaterial({
-          color: 0x444444,
-          transparent: true,
-          opacity: 0.5,
-          polygonOffset: true,
-          polygonOffsetFactor: 1,
-          polygonOffsetUnits: 1
-        })
+        const geometry = new THREE.BufferGeometry().setFromPoints(linePoints)
+        const material = new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.3 })
         const segments = new THREE.LineSegments(geometry, material)
-        segments.name = `grid_${x}_${y}`
+        segments.position.y = gridY
+        segments.name = `grid_${x}_${y}_level_${level}`
         segments.renderOrder = -1
         group.add(segments)
       }
@@ -289,22 +287,32 @@ export default function MapEditor() {
   }
 
   const _worldToHex = (worldX: number, worldZ: number): { x: number; y: number } | null => {
-    if (!mapRef.current) return null
     const scale = 3.5
-    const r = 1.0
     const R = 2 / Math.sqrt(3)
-
+    const width = mapRef.current?.width ?? 10
+    const height = mapRef.current?.height ?? 5
     const spacingX = 1.5 * R * scale
-    const spacingZ = 2.0 * r * scale
+    const spacingY = 2.0 * scale
+    const offsetX = -(width - 1) * spacingX / 2
+    const offsetZ = -(height - 1) * spacingY / 2
 
-    // Invert Flat Topped Offset-X coordinates
-    const x = Math.round(worldX / spacingX + mapRef.current.width / 2)
-    const y = Math.round((worldZ - (x % 2) * (spacingZ / 2)) / spacingZ + mapRef.current.height / 2)
+    const relX = worldX - offsetX
+    const relZ = worldZ - offsetZ
 
-    if (mapRef.current.isValidCoordinate(x, y)) {
-      return { x, y }
+    const col = Math.round(relX / spacingX)
+    const rowOffset = (col % 2 === 0) ? 0 : 0.5
+    const row = Math.round((relZ / spacingY) - rowOffset)
+
+    // Validate coordinates
+    if (!Number.isFinite(col) || !Number.isFinite(row)) {
+      return null
     }
-    return null
+
+    if (col < 0 || col >= width || row < 0 || row >= height) {
+      return null
+    }
+
+    return { x: col, y: row }
   }
 
   const setupLighting = (scene: THREE.Scene) => {
@@ -340,24 +348,30 @@ export default function MapEditor() {
         if (loadedModel) {
           const clone = loadedModel.clone()
 
-          // Measure tile height if not already known
-          const box = new THREE.Box3().setFromObject(clone)
-          const height = box.max.y - box.min.y
-          if (tileHeightRef.current === 1.0 && height > 0) {
-            tileHeightRef.current = height * 3.5 // Since we scale later
-          }
-
-          // Important: we scale the group AFTER we adjust individual positions to keep Z=0 consistent
+          // Important: we scale the group BEFORE measuring so we get the actual scaled height
           clone.rotation.y = Math.PI / 2 + (hex.rotation || 0)
           clone.scale.set(3.5, 3.5, 3.5)
 
-          // Adjust children so they're relative to the bottom at 0
+          // Measure tile height AFTER scaling to get actual scaled height
           const realBox = new THREE.Box3().setFromObject(clone)
           const actualHeight = realBox.max.y - realBox.min.y
-          tileHeightRef.current = actualHeight // Calibrate with real scale
+          
+          // Calibrate LEVEL_HEIGHT constant from first model if not set
+          // LEVEL_HEIGHT is CONSTANT (height of base tile after scaling)
+          if (tileHeightRef.current === 1.0 && actualHeight > 0) {
+            tileHeightRef.current = actualHeight
+          }
 
+          // LEVEL_HEIGHT is CONSTANT (height of base tile)
+          const LEVEL_HEIGHT = tileHeightRef.current
+
+          // Position: each level stands on top of the previous level
+          // Level 0: Y = 0 - minY (bottom of tile at ground level)
+          // Level 1: Y = LEVEL_HEIGHT - minY (bottom of tile at top of level 0)
+          // Level 2: Y = 2 * LEVEL_HEIGHT - minY (bottom of tile at top of level 1)
           const minY = realBox.min.y
-          clone.position.set(worldX, (hex.height || 0) * actualHeight - minY, worldZ)
+          const levelBaseY = (hex.height || 0) * LEVEL_HEIGHT
+          clone.position.set(worldX, levelBaseY - minY, worldZ)
 
           clone.traverse((child) => {
             if (child instanceof THREE.Mesh) {
@@ -369,7 +383,8 @@ export default function MapEditor() {
           // Update individual grid height
           const grid = sceneRef.current?.getObjectByName('__hexGrid')?.getObjectByName(`grid_${hex.x}_${hex.y}`)
           if (grid) {
-            grid.position.y = (hex.height || 0) * actualHeight + 0.001
+            const LEVEL_HEIGHT = tileHeightRef.current
+            grid.position.y = (hex.height || 0) * LEVEL_HEIGHT + 0.001
             grid.visible = true // Grid is always visible under tiles
           }
 
@@ -430,76 +445,80 @@ export default function MapEditor() {
     })
     buildingObjectsRef.current.clear()
 
-    const promises = mapRef.current.hexes
-      .filter(hex => hex)
-      .map(async (hex) => {
-        const mesh = await createHexMesh(hex!)
-        if (mesh && sceneRef.current) {
-          sceneRef.current.add(mesh)
-          hexMeshesRef.current.set(`${hex!.x},${hex!.y}`, mesh as any)
-        }
-      })
+    // Build meshes for all hexes in all stacks
+    const promises: Promise<void>[] = []
 
-    await Promise.all(promises)
-
-    // Set grid for empty spaces
-    if (sceneRef.current) {
-      const gridGroup = sceneRef.current.getObjectByName('__hexGrid') as THREE.Group
-      if (gridGroup) {
-        mapRef.current.hexes.forEach((hex, i) => {
-          if (!hex) {
-            const x = i % mapRef.current!.width
-            const y = Math.floor(i / mapRef.current!.width)
-            const grid = gridGroup.getObjectByName(`grid_${x}_${y}`)
-            if (grid) {
-              grid.position.y = 0
-              grid.visible = true
+    mapRef.current.hexes.forEach((hexStack, i) => {
+      if (hexStack && hexStack.length > 0) {
+        hexStack.forEach(hex => {
+          const promise = (async () => {
+            const mesh = await createHexMesh(hex)
+            if (mesh && sceneRef.current) {
+              sceneRef.current.add(mesh)
+              hexMeshesRef.current.set(`${hex.x},${hex.y}_${hex.height}`, mesh as any)
             }
-          }
+          })()
+          promises.push(promise)
         })
       }
-    }
+    })
+
+    await Promise.all(promises)
   }
 
-  const updateHexMesh = async (x: number, y: number) => {
+  const updateHexMesh = async (x: number, y: number, height?: number) => {
     if (!mapRef.current || !sceneRef.current) return
-    const hexKey = `${x},${y}`
-    const hex = mapRef.current.getHex(x, y)
-    const oldMesh = hexMeshesRef.current.get(hexKey)
 
-    // Мгновенное удаление старого меша
-    if (oldMesh) {
-      sceneRef.current.remove(oldMesh)
-      hexMeshesRef.current.delete(hexKey)
-    }
+    // If height specified, update only that hex. Otherwise update all hexes at position
+    const hexStack = mapRef.current.getHexStack(x, y)
+    const hexesToUpdate = height !== undefined
+      ? hexStack.filter(h => h.height === height)
+      : hexStack
 
-    if (hex) {
-      // Use hex's own modelData for rotation/height updates instead of the side panel selection
+    for (const hex of hexesToUpdate) {
+      const hexKey = `${x},${y}_${hex.height}`
+      const oldMesh = hexMeshesRef.current.get(hexKey)
+
+      // Remove old mesh
+      if (oldMesh) {
+        sceneRef.current.remove(oldMesh)
+        hexMeshesRef.current.delete(hexKey)
+      }
+
+      // Create new mesh
       const model = hex.modelData || selectedModel || availableModels[0]
 
       if (model) {
         if (!hex.modelData) hex.modelData = model
-        const key = `terrain_${hex.terrain}_${model.name}_${hex.x}_${hex.y}`
+        const key = `terrain_${hex.terrain}_${model.name}_${hex.x}_${hex.y}_${hex.height}`
         const cached = modelLoader.getCachedModel(key)
 
         if (cached) {
           const [wX, wZ] = hexToWorld(x, y)
           const clone = cached.clone()
-          clone.position.set(wX, 0, wZ)
           clone.rotation.y = Math.PI / 2 + (hex.rotation || 0)
           clone.scale.set(3.5, 3.5, 3.5)
 
-          // Ensure bottom is at Z=0 (Three.js Y=0) if not already
+          // Calculate position using CONSTANT level height
           const box = new THREE.Box3().setFromObject(clone)
-          const minY = box.min.y
-          if (Math.abs(minY) > 0.001) {
-            clone.position.y -= minY
-          }
+          const minY = box.min.y // Bottom of the model
+
+          // Level height is CONSTANT (height of base tile)
+          const LEVEL_HEIGHT = tileHeightRef.current || 0.7
+
+          // Position: level * LEVEL_HEIGHT, adjusted so bottom aligns with level top
+          const levelTop = hex.height * LEVEL_HEIGHT
+          clone.position.set(wX, levelTop - minY, wZ)
 
           sceneRef.current.add(clone)
           hexMeshesRef.current.set(hexKey, clone as any)
+
+          // Force selection highlight update if this is the selected hex
+          if (selectedHex && selectedHex.x === x && selectedHex.y === y) {
+            setSelectedHex({ ...selectedHex })
+          }
         } else {
-          // Если нет в кэше, загружаем асинхронно
+          // Load asynchronously if not cached
           const mesh = await createHexMesh(hex)
           if (mesh && sceneRef.current) {
             sceneRef.current.add(mesh)
@@ -512,20 +531,32 @@ export default function MapEditor() {
 
   const removeHex = async (x: number, y: number) => {
     if (!sceneRef.current || !mapRef.current) return
-    const hexKey = `${x},${y}`
+
+    // Always remove topmost hex
+    const hexStack = mapRef.current.getHexStack(x, y)
+    const targetHex = hexStack.length > 0 ? hexStack[hexStack.length - 1] : null
+
+    if (!targetHex) return
+
+    const hexKey = `${x},${y}_${targetHex.height}`
     const obj = hexMeshesRef.current.get(hexKey)
+
     if (obj) {
       sceneRef.current.remove(obj)
       hexMeshesRef.current.delete(hexKey)
+    }
 
-      // Reset grid height for this empty spot
-      const grid = sceneRef.current.getObjectByName('__hexGrid')?.getObjectByName(`grid_${x}_${y}`)
+    // Remove hex from map
+    mapRef.current.removeHex(x, y, targetHex.height)
+
+    // Update grid visibility - show grid for this level if no hex at this level
+    if (!mapRef.current.hasHex(x, y, targetHex.height)) {
+      const grid = sceneRef.current.getObjectByName(`__hexGrid_level_${targetHex.height}`)?.getObjectByName(`grid_${x}_${y}_level_${targetHex.height}`)
       if (grid) {
-        grid.position.y = 0
         grid.visible = true
       }
     }
-    mapRef.current.removeHex(x, y)
+
     const building = buildingObjectsRef.current.get(hexKey)
     if (building) {
       sceneRef.current.remove(building)
@@ -567,10 +598,12 @@ export default function MapEditor() {
       hitPlane.name = '__hitPlane'
       scene.add(hitPlane)
 
-      // Add a hexagonal grid helper instead of rectangular
-      const hexGrid = createHexagonalGrid(mapWidth, mapHeight)
-      hexGrid.name = '__hexGrid'
-      scene.add(hexGrid)
+      // Add hexagonal grids for all levels (initially only current level visible)
+      for (let level = 0; level <= 4; level++) {
+        const hexGrid = createHexagonalGrid(mapWidth, mapHeight, level)
+        hexGrid.visible = (level === currentHeightLevel)
+        scene.add(hexGrid)
+      }
 
       // Initialize Selection Highlight here to ensure it exists in the scene
       const scale = 3.5
@@ -618,11 +651,16 @@ export default function MapEditor() {
       scene.add(sMesh)
       selectionMeshRef.current = sMesh
 
-      const aspect = (window.innerWidth - 400) / (window.innerHeight - 150)
+      const container = containerRef.current
+      if (!container) return
+      const width = container.clientWidth
+      const height = container.clientHeight
+
+      const aspect = width / height
       const camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 10000)
       cameraRef.current = camera
       const renderer = new THREE.WebGLRenderer({ canvas: canvasRef.current, antialias: true })
-      renderer.setSize(window.innerWidth - 400, window.innerHeight - 150)
+      renderer.setSize(width, height)
       renderer.setPixelRatio(window.devicePixelRatio)
       renderer.shadowMap.enabled = true
       rendererRef.current = renderer
@@ -662,7 +700,7 @@ export default function MapEditor() {
 
   // Keyboard controls
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
       // Don't trigger if typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
@@ -677,32 +715,65 @@ export default function MapEditor() {
       if (e.code === 'KeyA') cameraTargetRef.current.add(right.multiplyScalar(-moveSpeed))
       if (e.code === 'KeyD') cameraTargetRef.current.add(right.multiplyScalar(moveSpeed))
 
-      // Q/E Rotating selected hex
+      // Q/E Rotating, R/F Height change for selected hex
       if (selectedHex && mapRef.current) {
-        const hex = mapRef.current.getHex(selectedHex.x, selectedHex.y)
+        // Always work with topmost hex
+        const hexStack = mapRef.current.getHexStack(selectedHex.x, selectedHex.y)
+        const hex = hexStack.length > 0 ? hexStack[hexStack.length - 1] : null
+
         if (hex) {
+          const oldHeight = hex.height
+
           if (e.code === 'KeyQ') {
             hex.rotation = (hex.rotation || 0) - Math.PI / 3
-            updateHexMesh(selectedHex.x, selectedHex.y)
+            updateHexMesh(selectedHex.x, selectedHex.y, hex.height)
           }
           if (e.code === 'KeyE') {
             hex.rotation = (hex.rotation || 0) + Math.PI / 3
-            updateHexMesh(selectedHex.x, selectedHex.y)
+            updateHexMesh(selectedHex.x, selectedHex.y, hex.height)
           }
           if (e.code === 'KeyR') {
-            hex.height = Math.min(4, (hex.height || 0) + 1)
-            updateHexMesh(selectedHex.x, selectedHex.y)
+            const newHeight = Math.min(4, (hex.height || 0) + 1)
+            if (newHeight !== oldHeight && !mapRef.current.hasHex(selectedHex.x, selectedHex.y, newHeight)) {
+              // Remove from old height
+              mapRef.current.removeHex(selectedHex.x, selectedHex.y, oldHeight)
+              const oldMeshKey = `${selectedHex.x},${selectedHex.y}_${oldHeight}`
+              const oldMesh = hexMeshesRef.current.get(oldMeshKey)
+              if (oldMesh && sceneRef.current) {
+                sceneRef.current.remove(oldMesh)
+                hexMeshesRef.current.delete(oldMeshKey)
+              }
+
+              // Add at new height
+              hex.height = newHeight
+              mapRef.current.setHex(selectedHex.x, selectedHex.y, hex)
+              await updateHexMesh(selectedHex.x, selectedHex.y, newHeight)
+            }
           }
           if (e.code === 'KeyF') {
-            hex.height = Math.max(0, (hex.height || 0) - 1)
-            updateHexMesh(selectedHex.x, selectedHex.y)
+            const newHeight = Math.max(0, (hex.height || 0) - 1)
+            if (newHeight !== oldHeight && !mapRef.current.hasHex(selectedHex.x, selectedHex.y, newHeight)) {
+              // Remove from old height
+              mapRef.current.removeHex(selectedHex.x, selectedHex.y, oldHeight)
+              const oldMeshKey = `${selectedHex.x},${selectedHex.y}_${oldHeight}`
+              const oldMesh = hexMeshesRef.current.get(oldMeshKey)
+              if (oldMesh && sceneRef.current) {
+                sceneRef.current.remove(oldMesh)
+                hexMeshesRef.current.delete(oldMeshKey)
+              }
+
+              // Add at new height
+              hex.height = newHeight
+              mapRef.current.setHex(selectedHex.x, selectedHex.y, hex)
+              await updateHexMesh(selectedHex.x, selectedHex.y, newHeight)
+            }
           }
         }
       }
 
-      // Delete key deletes selected hex
+      // Delete key deletes selected hex (topmost)
       if (e.code === 'Delete' && selectedHex) {
-        removeHex(selectedHex.x, selectedHex.y)
+        await removeHex(selectedHex.x, selectedHex.y)
         setSelectedHex(null)
       }
     }
@@ -718,12 +789,21 @@ export default function MapEditor() {
     if (!selectionMeshRef.current || !mapRef.current) return
 
     if (selectedHex) {
+      // Always get the topmost hex at this position
       const hex = mapRef.current.getHex(selectedHex.x, selectedHex.y)
+      if (!hex) {
+        selectionMeshRef.current.visible = false
+        return
+      }
+
       const [wX, wZ] = hexToWorld(selectedHex.x, selectedHex.y)
 
       let hValue = 0
       const hexKey = `${selectedHex.x},${selectedHex.y}`
-      const meshObj = hexMeshesRef.current.get(hexKey)
+      const hexStack = mapRef.current.getHexStack(selectedHex.x, selectedHex.y)
+      const topmostHex = hexStack.length > 0 ? hexStack[hexStack.length - 1] : hex
+      const meshKey = topmostHex ? `${selectedHex.x},${selectedHex.y}_${topmostHex.height}` : hexKey
+      const meshObj = hexMeshesRef.current.get(meshKey)
 
       if (meshObj) {
         meshObj.updateMatrixWorld(true)
@@ -731,31 +811,34 @@ export default function MapEditor() {
         if (!box.isEmpty()) {
           hValue = box.max.y
         } else {
-          hValue = (hex?.height || 0) * 0.7 + 0.7 // fallback
+          const LEVEL_HEIGHT = tileHeightRef.current || 0.7
+          hValue = (topmostHex?.height || 0) * LEVEL_HEIGHT + (LEVEL_HEIGHT / 2)
         }
       } else {
-        const h = hex ? (hex.height || 0) : 0
-        hValue = h * 0.7 + 0.7 // fallback based on approximate model height
+        const LEVEL_HEIGHT = tileHeightRef.current || 0.7
+        const h = topmostHex ? (topmostHex.height || 0) : 0
+        hValue = h * LEVEL_HEIGHT + (LEVEL_HEIGHT / 2)
       }
 
       selectionMeshRef.current.position.set(wX, hValue + 0.1, wZ)
       // Mirror the tile's rotation: constant offset PI/2 + hex state rotation
-      selectionMeshRef.current.rotation.y = Math.PI / 2 + (hex?.rotation || 0)
+      selectionMeshRef.current.rotation.y = Math.PI / 2 + (topmostHex?.rotation || 0)
       selectionMeshRef.current.visible = true
       // Force update
       selectionMeshRef.current.updateMatrixWorld()
     } else {
       selectionMeshRef.current.visible = false
     }
-  }, [selectedHex])
+  }, [selectedHex, mapRef.current?.hexes])
 
   useEffect(() => {
     const handleResize = () => {
-      if (cameraRef.current && rendererRef.current) {
-        const aspect = (window.innerWidth - 400) / (window.innerHeight - 150)
-        cameraRef.current.aspect = aspect
+      if (cameraRef.current && rendererRef.current && containerRef.current) {
+        const width = containerRef.current.clientWidth
+        const height = containerRef.current.clientHeight
+        cameraRef.current.aspect = width / height
         cameraRef.current.updateProjectionMatrix()
-        rendererRef.current.setSize(window.innerWidth - 400, window.innerHeight - 150)
+        rendererRef.current.setSize(width, height)
       }
     }
     window.addEventListener('resize', handleResize)
@@ -772,7 +855,7 @@ export default function MapEditor() {
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(mouse, cameraRef.current)
 
-    // Raycast against hexes first
+    // Raycast against hexes - always get the topmost (first) intersection
     const intersects = raycaster.intersectObjects(Array.from(hexMeshesRef.current.values()), true)
     if (intersects.length > 0) {
       let hitMesh: THREE.Object3D | null = intersects[0].object
@@ -785,11 +868,11 @@ export default function MapEditor() {
       }
 
       if (hexKey) {
-        const [x, y] = hexKey.split(',').map(Number)
+        // Parse key format: "x,y_height"
+        const parts = hexKey.split('_')
+        const [x, y] = parts[0].split(',').map(Number)
+        // Always select the topmost hex (no height in selectedHex)
         setSelectedHex({ x, y })
-        if (event.button === 2 || event.ctrlKey) {
-          removeHex(x, y)
-        }
         return
       }
     }
@@ -901,30 +984,126 @@ export default function MapEditor() {
                     className={cn("p-1 rounded-xl border-2 transition-all cursor-pointer group hover:bg-muted/30", selectedModel?.name === m.name ? "border-primary bg-primary/5" : "border-transparent bg-muted/10")}
                   >
                     <ModelPreview obj={m.obj} mtl={m.mtl} />
-                    <p className="text-[9px] font-bold text-center mt-1 truncate px-1 py-0.5">{m.name}</p>
+                    <p className="text-[11px] font-bold text-center mt-1 truncate px-1 py-1 uppercase tracking-tight">{m.name}</p>
                   </div>
                 ))}
               </div>
             </section>
           </div>
         </ScrollArea>
-        <div className="p-4 border-t border-border flex gap-2">
-          <Button variant="outline" className="flex-1">Open</Button>
-          <Button className="flex-1">Save</Button>
+        <div className="p-4 border-t border-border flex flex-col gap-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="outline" className="flex-1 font-bold">Open</Button>
+            <Button className="flex-1 font-bold shadow-lg shadow-primary/20">Save</Button>
+          </div>
         </div>
       </aside>
 
-      <main className="flex-1 relative flex flex-col overflow-hidden">
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-3 px-4 py-2 shadow-2xl">
+      <main className="flex-1 relative flex flex-col overflow-hidden bg-[#050505]" ref={containerRef}>
+        {/* TOP CENTER: CAMERA MODE */}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-3 px-4 py-2 shadow-2xl transition-all hover:bg-card/95">
           <Compass size={18} className="text-primary animate-pulse" />
-          <span className="text-xs font-bold tracking-tight">3D PERSPECTIVE</span>
-          <Separator orientation="vertical" className="h-4 bg-border" />
-          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full" onClick={() => { cameraDistanceRef.current = 150; cameraAngleXRef.current = Math.PI / 4; cameraAngleYRef.current = Math.PI / 4; }}>
-            <ArrowsInLineHorizontal size={16} />
+          <span className="text-xs font-bold tracking-tight uppercase">3D PERSPECTIVE</span>
+          <Separator orientation="vertical" className="h-4 bg-border/50" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full hover:bg-primary/20 text-primary transition-colors" onClick={() => { cameraDistanceRef.current = 150; cameraAngleXRef.current = Math.PI / 4; cameraAngleYRef.current = Math.PI / 4; }}>
+                <ArrowsInLineHorizontal size={16} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Reset View</TooltipContent>
+          </Tooltip>
+        </div>
+
+        {/* TOP LEFT: GRID INFO */}
+        <div className="absolute top-4 left-4 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-3 px-4 py-2 shadow-2xl">
+          <MapTrifold size={18} className="text-primary" weight="bold" />
+          <span className="text-xs font-bold tracking-tight uppercase">GRID: {mapWidth}×{mapHeight}</span>
+        </div>
+
+        {/* TOP RIGHT: CURRENT SELECTION FROM PREVIEW */}
+        {selectedModel && (
+          <div className="absolute top-4 right-4 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-3 pl-4 pr-2 py-1.5 shadow-2xl">
+            <Cube size={18} className="text-primary" weight="bold" />
+            <div className="flex flex-col leading-none">
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold leading-tight">Placing</span>
+              <span className="text-xs font-bold tracking-tight uppercase">{selectedModel.name}</span>
+            </div>
+            <div className="w-8 h-8 rounded-full border border-primary/20 bg-muted/20 overflow-hidden ml-1">
+              <ModelPreview obj={selectedModel.obj} mtl={selectedModel.mtl} />
+            </div>
+          </div>
+        )}
+
+        {/* LEFT CENTER: GLOBAL HEIGHT LEVEL SELECTOR */}
+        <div className="absolute left-6 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10 rounded-full bg-card/80 backdrop-blur-xl border border-border/50 hover:bg-primary/20 text-primary transition-all shadow-xl"
+            onClick={() => setCurrentHeightLevel(prev => Math.min(4, prev + 1))}
+            disabled={currentHeightLevel >= 4}
+          >
+            <CaretUp size={20} weight="bold" />
+          </Button>
+          <div className="p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-2xl px-4 py-3 shadow-2xl">
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Level</span>
+              <span className="text-2xl font-black text-primary tracking-tighter tabular-nums">{currentHeightLevel + 1}</span>
+              <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest leading-none">of 5</span>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10 rounded-full bg-card/80 backdrop-blur-xl border border-border/50 hover:bg-primary/20 text-primary transition-all shadow-xl"
+            onClick={() => setCurrentHeightLevel(prev => Math.max(0, prev - 1))}
+            disabled={currentHeightLevel <= 0}
+          >
+            <CaretDown size={20} weight="bold" />
           </Button>
         </div>
 
-        <div className="flex-1 bg-[#0a0a0a] relative">
+        {/* BOTTOM LEFT: SELECTION INFO */}
+        {selectedHex && mapRef.current?.getHex(selectedHex.x, selectedHex.y) && (
+          <div className="absolute bottom-6 left-6 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-4 px-6 py-3 shadow-2xl pointer-events-auto animate-in fade-in slide-in-from-left-4 duration-300">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Hex</span>
+              <span className="text-sm font-black text-primary tracking-tighter tabular-nums">{selectedHex.x}, {selectedHex.y}</span>
+            </div>
+            <Separator orientation="vertical" className="h-5 bg-border/50" />
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Level</span>
+              <span className="text-sm font-black text-primary tracking-tighter tabular-nums">{(mapRef.current.getHex(selectedHex.x, selectedHex.y)?.height || 0) + 1}/5</span>
+            </div>
+            <Separator orientation="vertical" className="h-5 bg-border/50" />
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Type</span>
+              <span className="text-xs font-bold text-primary tracking-tight uppercase">{mapRef.current.getHex(selectedHex.x, selectedHex.y)?.modelData?.name || mapRef.current.getHex(selectedHex.x, selectedHex.y)?.terrain || 'Standard'}</span>
+            </div>
+          </div>
+        )}
+
+        {/* BOTTOM RIGHT: CONTROLS */}
+        <div className="absolute bottom-6 right-6 z-30 p-1 bg-card/80 backdrop-blur-xl border border-border/50 rounded-full flex items-center gap-4 px-6 py-3 shadow-2xl pointer-events-auto">
+          <span className="text-[11px] font-bold text-primary tracking-widest uppercase flex items-center gap-2">
+            <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary">WASD</span> Pan
+          </span>
+          <Separator orientation="vertical" className="h-4 bg-border/50" />
+          <span className="text-[11px] font-bold text-primary tracking-widest uppercase flex items-center gap-2">
+            <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary">Q / E</span> Rotate
+          </span>
+          <Separator orientation="vertical" className="h-4 bg-border/50" />
+          <span className="text-[11px] font-bold text-primary tracking-widest uppercase flex items-center gap-2">
+            <span className="bg-primary/20 px-2 py-0.5 rounded border border-primary/30 text-primary">R / F</span> Height
+          </span>
+          <Separator orientation="vertical" className="h-4 bg-border/50" />
+          <span className="text-[11px] font-bold text-destructive tracking-widest uppercase flex items-center gap-2">
+            <span className="bg-destructive/20 px-2 py-0.5 rounded border border-destructive/30 text-destructive">DEL</span> Clear
+          </span>
+        </div>
+
+        <div className="flex-1 relative">
           {isLoading && <div className="absolute inset-0 bg-background/90 z-50 flex items-center justify-center font-bold uppercase tracking-widest">{loadingText}</div>}
           <canvas
             ref={canvasRef}
@@ -955,7 +1134,9 @@ export default function MapEditor() {
                   else hitMesh = hitMesh.parent
                 }
                 if (hexKey) {
-                  const [x, y] = hexKey.split(',').map(Number)
+                  // Parse key format: "x,y_height"
+                  const parts = hexKey.split('_')
+                  const [x, y] = parts[0].split(',').map(Number)
                   targetCoords = { x, y }
                 }
               }
@@ -972,17 +1153,46 @@ export default function MapEditor() {
               if (targetCoords) {
                 const { x, y } = targetCoords
                 setSelectedModel(draggedModelRef.current)
+
                 if (selectedCategory === 'tiles') {
                   let t = selectedTerrain
                   if (selectedFolder === 'roads') t = TERRAIN_TYPES.ROAD
                   else if (selectedFolder === 'coast') t = TERRAIN_TYPES.WATER
 
-                  const h = new Hex(x, y, t)
-                  h.modelData = draggedModelRef.current
-                  mapRef.current.setHex(x, y, h)
-                  await updateHexMesh(x, y)
+                  // Validate coordinates before proceeding
+                  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+                    console.error('Invalid coordinates from drop:', x, y)
+                    return
+                  }
+
+                  // Find next available level starting from current global level
+                  let targetLevel = currentHeightLevel
+                  while (targetLevel <= 4 && mapRef.current.hasHex(x, y, targetLevel)) {
+                    targetLevel++
+                  }
+
+                  // Only place if we found a free level
+                  if (targetLevel <= 4) {
+                    const h = new Hex(x, y, t)
+                    h.modelData = draggedModelRef.current
+                    h.height = targetLevel
+                    mapRef.current.setHex(x, y, h)
+                    await updateHexMesh(x, y, targetLevel)
+                  }
                 } else {
-                  await placeBuilding(x, y, draggedModelRef.current)
+                  // For buildings, same logic
+                  let targetLevel = currentHeightLevel
+                  while (targetLevel <= 4 && mapRef.current.hasHex(x, y, targetLevel)) {
+                    targetLevel++
+                  }
+
+                  if (targetLevel <= 4) {
+                    const h = new Hex(x, y, TERRAIN_TYPES.PLAINS)
+                    h.modelData = draggedModelRef.current
+                    h.height = targetLevel
+                    mapRef.current.setHex(x, y, h)
+                    await updateHexMesh(x, y, targetLevel)
+                  }
                 }
               }
               draggedModelRef.current = null
@@ -1011,27 +1221,6 @@ export default function MapEditor() {
             onWheel={handleWheel}
             onContextMenu={e => e.preventDefault()}
           />
-          <div className="absolute bottom-6 left-6 right-6 flex items-end justify-between pointer-events-none">
-            <div className="pointer-events-auto">
-              {selectedHex ? (
-                <Card className="w-64 bg-card/80 backdrop-blur-xl border-primary/20 p-4 shadow-2xl">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-[10px] font-bold text-primary italic">HEX: {selectedHex.x}, {selectedHex.y}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" className="flex-1 h-8 text-[11px]" onClick={() => updateHexMesh(selectedHex.x, selectedHex.y)}>Apply</Button>
-                    <Button size="sm" variant="destructive" className="h-8 w-8" onClick={() => removeHex(selectedHex.x, selectedHex.y)}><Trash size={14} /></Button>
-                  </div>
-                </Card>
-              ) : (
-                <Badge variant="outline" className="bg-card/40 backdrop-blur-md px-3 py-1 font-bold text-[10px] tracking-widest uppercase">No Selection</Badge>
-              )}
-            </div>
-            <div className="flex flex-col gap-1 items-end opacity-50">
-              <span className="text-[10px] font-bold uppercase tracking-tighter">Grid: {mapWidth}x{mapHeight}</span>
-              <span className="text-[9px] uppercase tracking-tighter">WASD/Drag to Rotate · Right Click to Remove</span>
-            </div>
-          </div>
         </div>
       </main>
 
